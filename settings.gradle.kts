@@ -20,7 +20,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "WatchRecorder"
+rootProject.name = "Hindsight"
 
 include(":shared")
 include(":wear")

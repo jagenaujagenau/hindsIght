@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Watch Recorder</string>
+    <string name="app_name">Hindsight</string>
     <string name="stop">Stop</string>
     <string name="notification_channel">Recording</string>
     <string name="notification_title">Listening</string>

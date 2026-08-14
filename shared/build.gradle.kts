@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.warmly.watchrecorder.shared"
+    namespace = "earth.diego.hindsight.shared"
     compileSdk = 35
 
     defaultConfig {

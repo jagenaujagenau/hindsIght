@@ -2,6 +2,6 @@
 <resources>
     <!-- Advertised to the watch so it can find this node. Must match WearProtocol. -->
     <string-array name="android_wear_capabilities">
-        <item>watchrecorder_clip_receiver</item>
+        <item>hindsight_clip_receiver</item>
     </string-array>
 </resources>

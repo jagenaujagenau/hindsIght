@@ -1,4 +1,6 @@
-# Watch Recorder
+# Hindsight
+
+*The last five minutes, always.*
 
 A Wear OS app that continuously listens and keeps only the last *X* minutes. Press
 **SAVE** and that window is written to an `.m4a` and pushed to the paired phone,
@@ -15,7 +17,7 @@ moment the phone confirms it landed.
 | `:mobile` | Phone companion — receives, stores and plays clips                   |
 | `:shared` | The Data Layer contract and audio parameters both sides must agree on |
 
-Both apps use the applicationId `com.warmly.watchrecorder`. That is deliberate and
+Both apps use the applicationId `earth.diego.hindsight`. That is deliberate and
 required: the Data Layer only bridges apps sharing an applicationId **and** a
 signing key. Debug builds from the same machine share `~/.android/debug.keystore`,
 so pairing works out of the box.
@@ -73,7 +75,7 @@ Other choices made for battery and CPU:
 
 ## Transfer
 
-The phone advertises the capability `watchrecorder_clip_receiver`
+The phone advertises the capability `hindsight_clip_receiver`
 (`mobile/src/main/res/values/wear.xml`). The watch resolves it, opens a
 `ChannelClient` channel at `/clip/<filename>.m4a` and streams the file.
 

@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "com.warmly.watchrecorder"
+    namespace = "earth.diego.hindsight"
     compileSdk = 35
 
     defaultConfig {
         // Must match the mobile module exactly — the Data Layer only bridges
         // apps that share an applicationId *and* a signing key.
-        applicationId = "com.warmly.watchrecorder"
+        applicationId = "earth.diego.hindsight"
         minSdk = 30
         targetSdk = 35
         versionCode = 1
