@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Watch Recorder</string>
+    <string name="stop">Stop</string>
+    <string name="notification_channel">Recording</string>
+    <string name="notification_title">Listening</string>
+    <string name="notification_text">Keeping the last %1$s</string>
+</resources>

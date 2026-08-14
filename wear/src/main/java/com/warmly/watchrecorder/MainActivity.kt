@@ -1,0 +1,33 @@
+package com.warmly.watchrecorder
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import com.warmly.watchrecorder.ui.RecorderApp
+
+class MainActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        super.onCreate(savedInstanceState)
+
+        setContent {
+            RecorderApp(
+                initiallyGranted = ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.RECORD_AUDIO,
+                ) == PackageManager.PERMISSION_GRANTED,
+                requiredPermissions = buildList {
+                    add(Manifest.permission.RECORD_AUDIO)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }.toTypedArray(),
+            )
+        }
+    }
+}

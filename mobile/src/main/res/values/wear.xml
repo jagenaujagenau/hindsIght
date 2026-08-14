@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Advertised to the watch so it can find this node. Must match WearProtocol. -->
+    <string-array name="android_wear_capabilities">
+        <item>watchrecorder_clip_receiver</item>
+    </string-array>
+</resources>
