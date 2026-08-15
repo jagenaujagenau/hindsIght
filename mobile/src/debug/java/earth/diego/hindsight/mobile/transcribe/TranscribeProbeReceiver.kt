@@ -37,6 +37,14 @@ class TranscribeProbeReceiver : BroadcastReceiver() {
             return
         }
 
+        // --es via worker: exercises the same path the UI button uses, including
+        // the sidecar write and library refresh.
+        if (intent.getBooleanExtra("worker", false)) {
+            Log.i(TAG, "PROBE enqueueing worker for ${clip.id}")
+            TranscribeWorker.start(app, clip.id)
+            return
+        }
+
         Log.i(TAG, "PROBE start ${clip.id} (${clip.durationSeconds}s)")
         Log.i(TAG, "PROBE availability=${Transcriber.availability(app) ?: "ok"}")
 

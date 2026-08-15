@@ -1,5 +1,7 @@
 package earth.diego.hindsight.mobile.ui
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import earth.diego.hindsight.mobile.data.Clip
 import earth.diego.hindsight.mobile.data.ClipStore
 import earth.diego.hindsight.mobile.player.PlaybackState
+import earth.diego.hindsight.mobile.ui.components.TranscriptPanel
+import earth.diego.hindsight.mobile.ui.components.TranscriptState
 import earth.diego.hindsight.mobile.ui.components.WaveformView
 
 private val SPEEDS = listOf(0.75f, 1f, 1.5f, 2f)
@@ -63,6 +67,9 @@ fun PlayerScreen(
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
     onShare: () -> Unit,
+    transcript: TranscriptState,
+    onTranscribe: () -> Unit,
+    onCancelTranscribe: () -> Unit,
 ) {
     var renaming by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
@@ -94,7 +101,9 @@ fun PlayerScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 20.dp)
+                // The transcript can be long, so the whole player scrolls.
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(4.dp))
@@ -107,7 +116,7 @@ fun PlayerScreen(
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(28.dp))
 
             WaveformView(
                 peaks = peaks,
@@ -185,7 +194,13 @@ fun PlayerScreen(
                 }
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(24.dp))
+            TranscriptPanel(
+                state = transcript,
+                onTranscribe = onTranscribe,
+                onCancel = onCancelTranscribe,
+            )
+            Spacer(Modifier.height(32.dp))
         }
     }
 

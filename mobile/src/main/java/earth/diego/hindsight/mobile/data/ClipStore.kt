@@ -18,6 +18,11 @@ data class Clip(
     val sizeBytes: Long,
     /** User-given name, or null to fall back to the timestamp. */
     val title: String? = null,
+    /**
+     * Best-effort speech transcript, or null if none has been made. Partial by
+     * nature — see [earth.diego.hindsight.mobile.transcribe.Transcriber].
+     */
+    val transcript: String? = null,
 ) {
     val id: String get() = file.name
     val displayTitle: String get() = title?.takeIf { it.isNotBlank() } ?: ClipStore.timeOfDay(recordedAt)
@@ -52,6 +57,8 @@ object ClipStore {
 
     private fun titleFile(clip: File) = File(clip.parentFile, clip.name + ".title")
 
+    fun transcriptFile(clip: File) = File(clip.parentFile, clip.name + ".txt")
+
     fun refresh(context: Context) {
         _clips.value = directory(context)
             .listFiles { f -> f.isFile && f.extension == "m4a" }
@@ -70,12 +77,20 @@ object ClipStore {
             durationSeconds = match?.groupValues?.get(2)?.toLongOrNull() ?: 0,
             sizeBytes = file.length(),
             title = runCatching { titleFile(file).takeIf { it.exists() }?.readText() }.getOrNull(),
+            transcript = runCatching {
+                transcriptFile(file).takeIf { it.exists() }?.readText()
+            }.getOrNull(),
         )
     }
 
     fun rename(context: Context, clip: Clip, title: String) {
         val target = titleFile(clip.file)
         if (title.isBlank()) target.delete() else target.writeText(title.trim())
+        refresh(context)
+    }
+
+    fun saveTranscript(context: Context, clip: File, text: String) {
+        transcriptFile(clip).writeText(text)
         refresh(context)
     }
 
@@ -87,6 +102,7 @@ object ClipStore {
             clip.file,
             Waveform.sidecarFor(clip.file).takeIf { it.exists() },
             titleFile(clip.file).takeIf { it.exists() },
+            transcriptFile(clip.file).takeIf { it.exists() },
         ).forEach { source ->
             val destination = File(bin, source.name)
             if (source.renameTo(destination)) moved += source to destination

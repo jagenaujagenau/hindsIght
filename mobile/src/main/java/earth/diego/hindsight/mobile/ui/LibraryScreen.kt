@@ -59,8 +59,15 @@ fun LibraryScreen(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
     val filtered = remember(clips, query) {
-        if (query.isBlank()) clips
-        else clips.filter { it.displayTitle.contains(query, ignoreCase = true) }
+        if (query.isBlank()) {
+            clips
+        } else {
+            // Searching spoken words is the whole reason transcripts exist here.
+            clips.filter {
+                it.displayTitle.contains(query, ignoreCase = true) ||
+                    it.transcript?.contains(query, ignoreCase = true) == true
+            }
+        }
     }
     val days = remember(filtered) { ClipStore.groupByDay(filtered) }
 
@@ -79,7 +86,7 @@ fun LibraryScreen(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Search clips") },
+                    placeholder = { Text("Search names and speech") },
                     singleLine = true,
                     shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
@@ -174,6 +181,7 @@ private fun ClipRow(clip: Clip, isPlaying: Boolean, onClick: () -> Unit) {
                             append(" · ")
                             append(ClipStore.timeOfDay(clip.recordedAt))
                         }
+                        if (clip.transcript != null) append(" · transcript")
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.work.WorkInfo
 import androidx.lifecycle.lifecycleScope
 import earth.diego.hindsight.mobile.audio.Waveform
 import earth.diego.hindsight.mobile.audio.WaveformWorker
@@ -35,7 +36,9 @@ import earth.diego.hindsight.mobile.data.Clip
 import earth.diego.hindsight.mobile.data.ClipStore
 import earth.diego.hindsight.mobile.player.ClipPlayer
 import earth.diego.hindsight.mobile.ui.LibraryScreen
+import earth.diego.hindsight.mobile.transcribe.TranscribeWorker
 import earth.diego.hindsight.mobile.ui.PlayerScreen
+import earth.diego.hindsight.mobile.ui.components.TranscriptState
 import earth.diego.hindsight.mobile.ui.theme.HindsightTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -148,8 +151,30 @@ private fun HindsightApp(player: ClipPlayer) {
                 },
             )
         } else {
+            // Observe this clip's transcription job so progress survives leaving
+            // and returning to the screen.
+            val workInfo by remember(clip.id) { TranscribeWorker.observe(context, clip.id) }
+                .collectAsStateWithLifecycle(initialValue = null)
+
+            val transcriptState = when {
+                clip.transcript != null -> TranscriptState.Ready(clip.transcript!!)
+                workInfo?.state == WorkInfo.State.RUNNING || workInfo?.state == WorkInfo.State.ENQUEUED ->
+                    TranscriptState.Running(
+                        done = workInfo?.progress?.getInt(TranscribeWorker.KEY_DONE, 0) ?: 0,
+                        total = workInfo?.progress?.getInt(TranscribeWorker.KEY_TOTAL, 0) ?: 0,
+                    )
+                workInfo?.state == WorkInfo.State.FAILED -> TranscriptState.Failed(
+                    workInfo?.outputData?.getString(TranscribeWorker.KEY_ERROR)
+                        ?: "Transcription failed",
+                )
+                else -> TranscriptState.None
+            }
+
             PlayerScreen(
                 clip = clip,
+                transcript = transcriptState,
+                onTranscribe = { TranscribeWorker.start(context, clip.id) },
+                onCancelTranscribe = { TranscribeWorker.cancel(context, clip.id) },
                 peaks = peaks,
                 playback = playback,
                 onBack = { openClipId = null },
