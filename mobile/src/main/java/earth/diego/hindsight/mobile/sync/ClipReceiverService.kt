@@ -15,6 +15,7 @@ import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import earth.diego.hindsight.mobile.MainActivity
 import earth.diego.hindsight.mobile.R
+import earth.diego.hindsight.mobile.audio.WaveformWorker
 import earth.diego.hindsight.mobile.data.ClipStore
 import earth.diego.hindsight.shared.WearProtocol
 import com.google.android.gms.tasks.Tasks
@@ -55,6 +56,8 @@ class ClipReceiverService : WearableListenerService() {
             check(partial.renameTo(destination)) { "Could not finalise ${destination.name}" }
 
             ClipStore.refresh(this)
+            // Build the envelope now so opening the clip later is instant.
+            WaveformWorker.enqueue(this)
             notifyArrival(fileName)
             Log.i(TAG, "Received $fileName (${destination.length()} bytes)")
 

@@ -62,7 +62,11 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // Phone only: R8 keeps just the icons actually referenced in release builds.
+    implementation(libs.androidx.compose.material.icons)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    implementation(libs.androidx.work.runtime.ktx)
 
     implementation(libs.play.services.wearable)
     implementation(libs.kotlinx.coroutines.play.services)

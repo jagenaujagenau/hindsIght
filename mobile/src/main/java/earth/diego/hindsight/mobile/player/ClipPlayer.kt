@@ -9,35 +9,41 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 
 data class PlaybackState(
-    val playingId: String? = null,
+    val clipId: String? = null,
+    val playing: Boolean = false,
     val positionMs: Int = 0,
     val durationMs: Int = 0,
-)
+    val speed: Float = 1f,
+) {
+    val progress: Float
+        get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+}
 
 /**
- * One clip at a time, backed by [MediaPlayer] — these are short mono AAC files
- * from a single local source, so ExoPlayer's adaptive machinery would be dead weight.
+ * Single-clip playback over [MediaPlayer].
+ *
+ * These are short mono AAC files from local storage, so ExoPlayer's adaptive
+ * streaming machinery would be weight without benefit. What matters here is
+ * accurate seeking, which MediaPlayer does fine.
  */
 class ClipPlayer {
 
-    private companion object { const val TAG = "ClipPlayer" }
+    private companion object {
+        const val TAG = "ClipPlayer"
+        const val SKIP_MS = 15_000
+    }
 
     private var player: MediaPlayer? = null
 
     private val _state = MutableStateFlow(PlaybackState())
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
-    fun toggle(id: String, file: File) {
-        if (_state.value.playingId == id) {
-            val active = player
-            if (active != null && active.isPlaying) active.pause() else active?.start()
+    fun open(clipId: String, file: File, autoPlay: Boolean = true) {
+        if (_state.value.clipId == clipId && player != null) {
+            if (autoPlay && _state.value.playing.not()) togglePlayPause()
             return
         }
-        play(id, file)
-    }
-
-    private fun play(id: String, file: File) {
-        stop()
+        release()
         try {
             player = MediaPlayer().apply {
                 setAudioAttributes(
@@ -47,28 +53,83 @@ class ClipPlayer {
                         .build(),
                 )
                 setDataSource(file.absolutePath)
-                setOnCompletionListener { stop() }
+                setOnCompletionListener {
+                    // Park at the end rather than resetting, so the waveform still
+                    // shows where you got to.
+                    _state.value = _state.value.copy(playing = false, positionMs = duration)
+                }
                 prepare()
-                start()
+                if (autoPlay) start()
             }
-            _state.value = PlaybackState(id, 0, player?.duration ?: 0)
+            _state.value = PlaybackState(
+                clipId = clipId,
+                playing = autoPlay,
+                positionMs = 0,
+                durationMs = player?.duration ?: 0,
+            )
         } catch (t: Throwable) {
-            Log.e(TAG, "Cannot play ${file.name}", t)
-            stop()
+            Log.e(TAG, "Cannot open ${file.name}", t)
+            release()
         }
     }
 
-    /** Called from a UI-side ticker; keeps the progress bar honest without a listener. */
+    fun togglePlayPause() {
+        val active = player ?: return
+        runCatching {
+            if (active.isPlaying) {
+                active.pause()
+                _state.value = _state.value.copy(playing = false)
+            } else {
+                // Restart from the beginning if we are parked at the end.
+                if (active.currentPosition >= active.duration - 50) active.seekTo(0)
+                active.start()
+                _state.value = _state.value.copy(playing = true)
+            }
+        }
+    }
+
+    fun seekTo(positionMs: Int) {
+        val active = player ?: return
+        val target = positionMs.coerceIn(0, active.duration)
+        runCatching {
+            active.seekTo(target)
+            _state.value = _state.value.copy(positionMs = target)
+        }
+    }
+
+    fun seekToFraction(fraction: Float) {
+        val active = player ?: return
+        seekTo((fraction.coerceIn(0f, 1f) * active.duration).toInt())
+    }
+
+    fun skip(deltaMs: Int = SKIP_MS) {
+        val active = player ?: return
+        seekTo(active.currentPosition + deltaMs)
+    }
+
+    fun setSpeed(speed: Float) {
+        val active = player ?: return
+        runCatching {
+            val wasPlaying = active.isPlaying
+            // Setting params starts playback as a side effect; preserve intent.
+            active.playbackParams = active.playbackParams.setSpeed(speed)
+            if (!wasPlaying) active.pause()
+            _state.value = _state.value.copy(speed = speed, playing = wasPlaying)
+        }
+    }
+
+    /** Called from a UI ticker while playing; MediaPlayer has no position callback. */
     fun syncPosition() {
         val active = player ?: return
         runCatching {
-            _state.value = _state.value.copy(positionMs = active.currentPosition)
+            _state.value = _state.value.copy(
+                positionMs = active.currentPosition,
+                playing = active.isPlaying,
+            )
         }
     }
 
-    val isPlaying: Boolean get() = runCatching { player?.isPlaying == true }.getOrDefault(false)
-
-    fun stop() {
+    fun release() {
         player?.runCatching {
             reset()
             release()
