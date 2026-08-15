@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug-only overlay: exposes a broadcast that runs on-device transcription
+    against a stored clip so its behaviour on long audio can be measured from
+    adb. Not merged into release builds.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".transcribe.TranscribeProbeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="earth.diego.hindsight.TRANSCRIBE" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
