@@ -26,6 +26,9 @@ data class CaptureState(
     val bufferedMs: Long = 0,
     val retentionMs: Long = 0,
     val peakLevel: Float = 0f,
+    /** Increments once per emitted frame so the UI can advance a waveform in step
+     *  with capture, rather than animating on a timer that knows nothing about it. */
+    val sampleSeq: Long = 0,
 )
 
 /**
@@ -47,7 +50,12 @@ class RingRecorder(bufferDir: File) {
         /** ~2.7 s of encoded audio in flight; caps loss if the service is killed. */
         const val SEGMENT_WRITE_BUFFER = 8 * 1024
 
-        const val STATE_EMIT_INTERVAL_FRAMES = 4 // ~4 Hz
+        /**
+         * One emit per encoded frame (~15.6 Hz at 64 ms/frame). The waveform needs
+         * this to move convincingly; when no UI is collecting it is just a field
+         * write, and Compose stops collecting entirely once the screen is off.
+         */
+        const val STATE_EMIT_INTERVAL_FRAMES = 1
     }
 
     private val ring = SegmentRing(bufferDir)
@@ -67,6 +75,7 @@ class RingRecorder(bufferDir: File) {
     private var currentFrames = 0
     private var framesSinceEmit = 0
     private var peak = 0f
+    private var emittedFrames = 0L
 
     fun start(retentionMinutes: Int) {
         if (running) {
@@ -252,6 +261,7 @@ class RingRecorder(bufferDir: File) {
                 bufferedMs = ClipBuilder.durationMs(buffered),
                 retentionMs = ClipBuilder.durationMs(retentionFrames),
                 peakLevel = peak,
+                sampleSeq = ++emittedFrames,
             )
             peak = 0f
         }
