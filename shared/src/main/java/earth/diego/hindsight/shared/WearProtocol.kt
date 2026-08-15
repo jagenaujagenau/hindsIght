@@ -15,11 +15,30 @@ object WearProtocol {
     /** Channel path prefix. Full path is `/clip/<filename>.m4a`. */
     const val CHANNEL_CLIP_PREFIX = "/clip/"
 
+    /**
+     * Acknowledgement sent phone -> watch once a clip is durably on disk.
+     * Full path is `/clip-ack/<filename>.m4a`.
+     *
+     * This exists because transport success is not delivery: `sendFile` resolves
+     * when bytes reach the *local* Bluetooth buffer, which tells us nothing about
+     * whether the phone ever wrote them. The watch holds its only copy until this
+     * arrives.
+     */
+    const val MESSAGE_ACK_PREFIX = "/clip-ack/"
+
     fun clipChannelPath(fileName: String): String = CHANNEL_CLIP_PREFIX + fileName
 
-    fun fileNameFromChannelPath(path: String): String? =
-        path.removePrefix(CHANNEL_CLIP_PREFIX)
-            .takeIf { path.startsWith(CHANNEL_CLIP_PREFIX) && it.isNotBlank() && !it.contains('/') }
+    fun ackMessagePath(fileName: String): String = MESSAGE_ACK_PREFIX + fileName
+
+    fun fileNameFromChannelPath(path: String): String? = fileNameAfter(path, CHANNEL_CLIP_PREFIX)
+
+    fun fileNameFromAckPath(path: String): String? = fileNameAfter(path, MESSAGE_ACK_PREFIX)
+
+    private fun fileNameAfter(path: String, prefix: String): String? =
+        path.removePrefix(prefix)
+            // Reject nested paths: the name is used to build a File, so a stray
+            // separator would let a peer write outside the clips directory.
+            .takeIf { path.startsWith(prefix) && it.isNotBlank() && !it.contains('/') }
 }
 
 /**

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug-only overlay. A real watch dozes aggressively, which makes driving the
+    UI over `adb shell input` unreliable, so debug builds expose the recorder
+    service to adb:
+
+        adb shell am start-foreground-service \
+            -n earth.diego.hindsight/.service.RecorderService \
+            -a earth.diego.hindsight.START
+
+    Release builds keep the service unexported — this file is not merged into them.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <service
+            android:name=".service.RecorderService"
+            android:exported="true"
+            tools:replace="android:exported" />
+    </application>
+</manifest>

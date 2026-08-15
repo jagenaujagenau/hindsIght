@@ -57,11 +57,32 @@ class ClipReceiverService : WearableListenerService() {
             ClipStore.refresh(this)
             notifyArrival(fileName)
             Log.i(TAG, "Received $fileName (${destination.length()} bytes)")
+
+            // Only now is it safe for the watch to drop its copy. Sent after the
+            // rename, so an ack can never describe a partial file.
+            acknowledge(channel.nodeId, fileName)
         } catch (t: Throwable) {
             partial.delete()
+            // No ack: the watch keeps the clip and the next run retries it.
             Log.e(TAG, "Failed to receive $fileName", t)
         } finally {
             runCatching { Tasks.await(channelClient.close(channel)) }
+        }
+    }
+
+    private fun acknowledge(nodeId: String, fileName: String) {
+        try {
+            Tasks.await(
+                Wearable.getMessageClient(applicationContext).sendMessage(
+                    nodeId,
+                    WearProtocol.ackMessagePath(fileName),
+                    ByteArray(0),
+                ),
+            )
+            Log.i(TAG, "Acknowledged $fileName to $nodeId")
+        } catch (t: Throwable) {
+            // The clip is safe here; the watch simply resends until an ack lands.
+            Log.w(TAG, "Could not acknowledge $fileName", t)
         }
     }
 

@@ -25,13 +25,23 @@
             Wakes on any Data Layer traffic from the watch. Google Play services
             binds this directly; it needs no exported activity of its own.
         -->
+        <!--
+            No android:permission here. That attribute constrains the *caller*, and
+            Google Play services does not hold BIND_LISTENER_SERVICE, so declaring
+            it makes GMS permanently unable to bind and every clip is dropped.
+            Incoming paths are validated in code instead.
+        -->
         <service
             android:name=".sync.ClipReceiverService"
-            android:exported="true"
-            android:permission="com.google.android.gms.permission.BIND_LISTENER_SERVICE">
+            android:exported="true">
+            <!--
+                Scheme + host only, deliberately. A pathPrefix here silently stops
+                Play services routing channel events at all; the service validates
+                the path itself via WearProtocol.fileNameFromChannelPath.
+            -->
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
-                <data android:scheme="wear" android:host="*" android:pathPrefix="/clip/" />
+                <data android:scheme="wear" android:host="*" />
             </intent-filter>
         </service>
 

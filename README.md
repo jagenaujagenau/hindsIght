@@ -81,9 +81,25 @@ The phone advertises the capability `hindsight_clip_receiver`
 
 Delivery is driven by a WorkManager job with exponential backoff, so clips saved
 while the phone is out of range queue in `outbox/` and go out when it returns. The
-watch deletes its copy only after the send completes; the phone writes to a
-`.part` file and renames on success, so an interrupted transfer is safe to retry
-and never surfaces a truncated clip.
+phone writes to a `.part` file and renames on success, so an interrupted transfer
+never surfaces a truncated clip.
+
+**Transport success is not delivery.** `ChannelClient.sendFile` resolves once the
+bytes reach the local Bluetooth buffer — the peer may never have seen them. So the
+watch does not delete anything on send. After writing a clip to disk the phone
+sends `/clip-ack/<filename>`, and only that message authorises the watch to
+reclaim its copy. A transfer that dies in flight therefore costs a retry, not a
+recording. Re-sending a clip the phone already holds is harmless: it re-acks.
+
+Two Wear-specific traps are worth calling out, because both fail *silently*:
+
+- **Never put `android:permission` on a `WearableListenerService`.** That attribute
+  constrains the caller, and Google Play services does not hold
+  `BIND_LISTENER_SERVICE`. Declaring it makes GMS permanently unable to bind, so
+  channel events queue up and are dropped with a `SecurityException` in GMS's own
+  log — the app sees nothing at all.
+- **Never close a channel straight after `sendFile`.** It aborts the in-flight
+  transfer. `sendFile` closes the output stream itself; wait for `onOutputClosed`.
 
 ## Build and run
 
