@@ -3,6 +3,7 @@ package earth.diego.hindsight.data
 import android.content.Context
 import androidx.compose.ui.graphics.Color
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -66,17 +67,49 @@ enum class Accent(val label: String, val color: Color?) {
     }
 }
 
+/**
+ * How much of the bar height a given loudness earns.
+ *
+ * This is a taste setting, not a correctness one: rooms differ, and a scale that
+ * feels alive in an office saturates in a cafe. The value is the dB window mapped
+ * across the wave, so a wider window makes quiet sounds draw taller.
+ */
+enum class Sensitivity(val label: String, val rangeDb: Float, val description: String) {
+    LOW("Low", 45f, "Only speech nearby"),
+    MEDIUM("Medium", 60f, "Normal conversation"),
+    HIGH("High", 75f, "Picks up the room");
+
+    companion object {
+        val DEFAULT = MEDIUM
+        fun from(name: String?): Sensitivity = entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
+}
+
 data class Appearance(
     val retention: Retention = Retention.DEFAULT,
     val waveStyle: WaveStyle = WaveStyle.DEFAULT,
     val accent: Accent = Accent.DEFAULT,
+    val sensitivity: Sensitivity = Sensitivity.DEFAULT,
 )
 
 class RecorderSettings(private val context: Context) {
 
+    private val listeningKey = booleanPreferencesKey("listening")
     private val retentionKey = intPreferencesKey("retention_minutes")
     private val waveKey = stringPreferencesKey("wave_style")
     private val accentKey = stringPreferencesKey("accent")
+    private val sensitivityKey = stringPreferencesKey("sensitivity")
+
+    /**
+     * Whether the user wants to be listening — persisted, because it is intent,
+     * not UI state.
+     *
+     * Holding this in the composition meant that if the service died (reinstall,
+     * a system kill) while the activity was later restored from saved state, the
+     * app decided it had "already auto-started" and never resumed. Defaults to
+     * true so a first launch records immediately.
+     */
+    val listening: Flow<Boolean> = context.dataStore.data.map { it[listeningKey] ?: true }
 
     val retention: Flow<Retention> = context.dataStore.data.map { prefs ->
         Retention.fromMinutes(prefs[retentionKey] ?: Retention.DEFAULT.minutes)
@@ -86,8 +119,15 @@ class RecorderSettings(private val context: Context) {
 
     val accent: Flow<Accent> = context.dataStore.data.map { Accent.from(it[accentKey]) }
 
+    val sensitivity: Flow<Sensitivity> =
+        context.dataStore.data.map { Sensitivity.from(it[sensitivityKey]) }
+
     val appearance: Flow<Appearance> =
-        combine(retention, waveStyle, accent) { r, w, a -> Appearance(r, w, a) }
+        combine(retention, waveStyle, accent, sensitivity) { r, w, a, s -> Appearance(r, w, a, s) }
+
+    suspend fun setListening(listening: Boolean) {
+        context.dataStore.edit { it[listeningKey] = listening }
+    }
 
     suspend fun setRetention(retention: Retention) {
         context.dataStore.edit { it[retentionKey] = retention.minutes }
@@ -95,6 +135,10 @@ class RecorderSettings(private val context: Context) {
 
     suspend fun setWaveStyle(style: WaveStyle) {
         context.dataStore.edit { it[waveKey] = style.name }
+    }
+
+    suspend fun setSensitivity(sensitivity: Sensitivity) {
+        context.dataStore.edit { it[sensitivityKey] = sensitivity.name }
     }
 
     suspend fun setAccent(accent: Accent) {

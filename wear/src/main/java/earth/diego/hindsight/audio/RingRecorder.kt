@@ -44,8 +44,16 @@ class RingRecorder(bufferDir: File) {
     private companion object {
         const val TAG = "RingRecorder"
 
-        /** Two AAC frames of PCM per read: halves loop iterations, keeps latency ~128 ms. */
-        const val PCM_READ_BYTES = AudioSpec.SAMPLES_PER_FRAME * 2 * 2
+        /**
+         * Exactly one AAC frame of PCM per read (1024 samples, 16-bit mono).
+         *
+         * This must stay 1:1 with encoded frames. Reading two frames' worth while
+         * emitting state per encoded frame meant `peak` was measured once but
+         * consumed twice, so every second frame reported a level of zero and the
+         * waveform was half blank — which reads as "the mic is barely working"
+         * even though the recording itself is fine.
+         */
+        const val PCM_READ_BYTES = AudioSpec.SAMPLES_PER_FRAME * 2
 
         /** ~2.7 s of encoded audio in flight; caps loss if the service is killed. */
         const val SEGMENT_WRITE_BUFFER = 8 * 1024

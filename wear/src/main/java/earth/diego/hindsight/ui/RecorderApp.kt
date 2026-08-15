@@ -11,7 +11,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,14 +56,11 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>) {
     }
 
     // Opening the app *is* the start gesture — there is no idle screen to press
-    // through. Guarded so that stopping by long-press is not immediately undone
-    // by a recomposition.
-    var autoStarted by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(granted) {
-        if (granted && !autoStarted) {
-            autoStarted = true
-            RecorderService.start(context)
-        }
+    // through. Driven off persisted intent rather than a composition flag, so a
+    // service that died is picked back up instead of leaving a dead flat line.
+    val listening by settings.listening.collectAsStateWithLifecycle(true)
+    LaunchedEffect(granted, listening, capture.recording) {
+        if (granted && listening && !capture.recording) RecorderService.start(context)
     }
 
     HindsightTheme {
@@ -85,9 +81,13 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>) {
                             state = capture,
                             style = appearance.waveStyle,
                             accent = appearance.accent.color ?: MaterialTheme.colorScheme.primary,
+                            sensitivity = appearance.sensitivity,
                             onSave = { RecorderService.save(context) },
-                            onStop = { RecorderService.stop(context) },
-                            onResume = { RecorderService.start(context) },
+                            onStop = {
+                                scope.launch { settings.setListening(false) }
+                                RecorderService.stop(context)
+                            },
+                            onResume = { scope.launch { settings.setListening(true) } },
                         )
 
                         PAGE_SETTINGS -> SettingsScreen(
@@ -97,6 +97,8 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>) {
                             resolvedAccent = MaterialTheme.colorScheme.primary,
                             onWaveStyle = { scope.launch { settings.setWaveStyle(it) } },
                             onAccent = { scope.launch { settings.setAccent(it) } },
+                            sensitivity = appearance.sensitivity,
+                            onSensitivity = { scope.launch { settings.setSensitivity(it) } },
                             onRetention = { choice ->
                                 if (capture.recording) {
                                     // Live change: the service resizes the ring and persists it.

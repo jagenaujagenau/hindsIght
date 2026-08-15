@@ -35,7 +35,9 @@ import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
 import earth.diego.hindsight.audio.CaptureState
+import earth.diego.hindsight.data.Sensitivity
 import earth.diego.hindsight.data.WaveStyle
+import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
 
@@ -57,6 +59,7 @@ fun WaveScreen(
     state: CaptureState,
     style: WaveStyle,
     accent: Color,
+    sensitivity: Sensitivity,
     onSave: () -> Unit,
     onStop: () -> Unit,
     onResume: () -> Unit,
@@ -73,7 +76,7 @@ fun WaveScreen(
     LaunchedEffect(state.sampleSeq) {
         if (!state.recording) return@LaunchedEffect
         System.arraycopy(levels, 1, levels, 0, SAMPLE_COUNT - 1)
-        levels[SAMPLE_COUNT - 1] = state.peakLevel
+        levels[SAMPLE_COUNT - 1] = perceptualLevel(state.peakLevel, sensitivity.rangeDb)
         version++
     }
 
@@ -117,7 +120,7 @@ fun WaveScreen(
                 Box(
                     Modifier
                         .fillMaxWidth(fraction = 0.78f)
-                        .height(if (style == WaveStyle.PULSE) 150.dp else 96.dp)
+                        .height(if (style == WaveStyle.PULSE) 160.dp else 128.dp)
                         .drawBehind {
                             val colour = lerpColor(resting, accent, amplitude.value)
                             when (style) {
@@ -143,13 +146,40 @@ fun WaveScreen(
 }
 
 /**
+ * Maps a raw sample peak onto bar height, logarithmically, across a window chosen
+ * by [Sensitivity].
+ *
+ * Linear looks broken: measured on a real watch, normal speech peaks around 4-8%
+ * of full scale, which draws as a flat line even though the recording is fine.
+ * Metering in dBFS the way audio equipment does puts conversation near 0.6 with
+ * headroom left for anything louder. There is deliberately no auto-gain — it
+ * pinned everything to full height and the wave stopped meaning anything.
+ *
+ * [CaptureState.peakLevel] stays the honest raw value; this is presentation only.
+ */
+private fun perceptualLevel(peak: Float, rangeDb: Float): Float {
+    if (peak <= SILENCE_FLOOR) return 0f
+    val db = 20f * log10(peak)
+    val level = ((db + rangeDb) / rangeDb).coerceIn(0f, 1f)
+    // Gate the room's noise floor so silence draws a still line.
+    return if (level < NOISE_GATE) 0f else level
+}
+
+/** Below this the room is silent enough that the line should be still. */
+private const val SILENCE_FLOOR = 0.0005f
+
+/** Below this the signal is room tone, not something worth drawing. */
+private const val NOISE_GATE = 0.12f
+
+
+/**
  * Ends taper toward the centre so a full-width wave sits inside a round display
  * instead of being clipped by it.
  */
 private fun edgeFalloff(index: Int): Float {
     val half = (SAMPLE_COUNT - 1) / 2f
     val t = (index - half) / half
-    return 1f - (t * t) * 0.55f
+    return 1f - (t * t) * 0.35f
 }
 
 private fun DrawScope.drawBars(levels: FloatArray, version: Int, amplitude: Float, color: Color) {

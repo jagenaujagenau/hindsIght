@@ -20,6 +20,7 @@ import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
 import earth.diego.hindsight.data.Accent
 import earth.diego.hindsight.data.Retention
+import earth.diego.hindsight.data.Sensitivity
 import earth.diego.hindsight.data.WaveStyle
 
 /**
@@ -31,10 +32,12 @@ fun SettingsScreen(
     retention: Retention,
     waveStyle: WaveStyle,
     accent: Accent,
+    sensitivity: Sensitivity,
     resolvedAccent: Color,
     onRetention: (Retention) -> Unit,
     onWaveStyle: (WaveStyle) -> Unit,
     onAccent: (Accent) -> Unit,
+    onSensitivity: (Sensitivity) -> Unit,
 ) {
     val listState = rememberTransformingLazyColumnState()
 
@@ -75,6 +78,21 @@ fun SettingsScreen(
                                 .size(18.dp)
                                 .background(option.color ?: resolvedAccent, CircleShape),
                         )
+                    },
+                )
+            }
+
+            item { ListHeader { Text("Sensitivity") } }
+            items(Sensitivity.entries.toList()) { option ->
+                RadioButton(
+                    selected = option == sensitivity,
+                    onSelect = { onSensitivity(option) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    label = { Text(option.label) },
+                    secondaryLabel = {
+                        Text(option.description, style = MaterialTheme.typography.labelSmall)
                     },
                 )
             }
