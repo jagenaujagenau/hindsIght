@@ -36,6 +36,14 @@ android {
     buildFeatures {
         compose = true
     }
+    lint {
+        // AGP 8.7.3's bundled lint crashes with IncompatibleClassChangeError while
+        // analysing the newer androidx artifacts, which fails release assembly.
+        // Disabling the individual detector is not enough — the crash happens
+        // during analysis setup — so the release gate is off until the toolchain
+        // moves to AGP 9.x. `./gradlew :wear:lintDebug` still runs on demand.
+        checkReleaseBuilds = false
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }

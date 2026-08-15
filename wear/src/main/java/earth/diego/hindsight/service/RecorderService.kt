@@ -16,6 +16,8 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
 import earth.diego.hindsight.MainActivity
 import earth.diego.hindsight.R
 import earth.diego.hindsight.audio.ClipBuilder
@@ -209,6 +211,14 @@ class RecorderService : Service() {
             .notify(NOTIFICATION_ID, buildNotification())
     }
 
+    /**
+     * The foreground notification doubles as the watch-face presence chip.
+     *
+     * A recorder that keeps running after the screen dims is otherwise invisible:
+     * OngoingActivity puts it on the watch face, so the user can see it is still
+     * listening and get back in one tap. It decorates this very builder, so it
+     * must be applied before build().
+     */
     private fun buildNotification(): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -218,7 +228,7 @@ class RecorderService : Service() {
             this, 1, Intent(this, RecorderService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text, retention.label))
@@ -227,7 +237,17 @@ class RecorderService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+
+        OngoingActivity.Builder(this, NOTIFICATION_ID, builder)
+            .setStaticIcon(R.drawable.ic_launcher_foreground)
+            .setTouchIntent(open)
+            .setStatus(
+                Status.Builder().addTemplate(getString(R.string.notification_text, retention.label)).build(),
+            )
             .build()
+            .apply(this)
+
+        return builder.build()
     }
 
     private fun createNotificationChannel() {

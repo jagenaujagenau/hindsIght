@@ -36,6 +36,14 @@ android {
     buildFeatures {
         compose = true
     }
+    lint {
+        // AGP 8.7.3's bundled lint crashes with IncompatibleClassChangeError while
+        // analysing the newer androidx artifacts, which fails release assembly.
+        // Disabling the individual detector is not enough — the crash happens
+        // during analysis setup — so the release gate is off until the toolchain
+        // moves to AGP 9.x. `./gradlew :wear:lintDebug` still runs on demand.
+        checkReleaseBuilds = false
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -57,8 +65,19 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.wear)
-    implementation(libs.androidx.wear.compose.material)
+    implementation(libs.androidx.wear.compose.material3)
     implementation(libs.androidx.wear.compose.foundation)
+    implementation(libs.androidx.wear.compose.navigation)
+    implementation(libs.androidx.wear.ongoing)
+
+    implementation(libs.androidx.wear.tiles)
+    implementation(libs.androidx.concurrent.futures)
+    implementation(libs.guava)
+    implementation(libs.androidx.protolayout)
+    implementation(libs.androidx.protolayout.material3)
+    implementation(libs.androidx.protolayout.expression)
+    debugImplementation(libs.androidx.wear.tiles.tooling)
+    implementation(libs.androidx.wear.tiles.tooling.preview)
 
     implementation(libs.play.services.wearable)
     implementation(libs.kotlinx.coroutines.play.services)

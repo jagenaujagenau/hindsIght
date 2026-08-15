@@ -1,50 +1,72 @@
 package earth.diego.hindsight.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.material.Chip
-import androidx.wear.compose.material.ChipDefaults
-import androidx.wear.compose.material.ListHeader
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Scaffold
-import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.TimeText
-import androidx.wear.compose.material.Vignette
-import androidx.wear.compose.material.VignettePosition
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.ListHeader
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.RadioButton
+import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.Text
 import earth.diego.hindsight.data.Retention
 
 @Composable
 fun RetentionScreen(
     selected: Retention,
+    recording: Boolean,
     onSelect: (Retention) -> Unit,
+    onStop: () -> Unit,
 ) {
-    val listState = rememberScalingLazyListState()
+    val listState = rememberTransformingLazyColumnState()
 
-    Scaffold(
-        timeText = { TimeText() },
-        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
-    ) {
-        ScalingLazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
+    ScreenScaffold(scrollState = listState) { contentPadding ->
+        TransformingLazyColumn(
+            state = listState,
+            contentPadding = contentPadding,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             item {
-                ListHeader { Text("Save last", style = MaterialTheme.typography.caption1) }
+                ListHeader { Text("How far back?") }
             }
-            items(Retention.entries) { option ->
-                Chip(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onSelect(option) },
+            items(Retention.entries.toList()) { option ->
+                RadioButton(
+                    selected = option == selected,
+                    onSelect = { onSelect(option) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
                     label = { Text(option.label) },
-                    // Storage cost is the real tradeoff behind this choice, so show it.
-                    secondaryLabel = { Text("~%.1f MB".format(option.approxStorageMb)) },
-                    colors = if (option == selected) {
-                        ChipDefaults.primaryChipColors()
-                    } else {
-                        ChipDefaults.secondaryChipColors()
+                    // Storage is the real trade-off behind this choice, so name it.
+                    secondaryLabel = {
+                        Text(
+                            "~%.1f MB".format(option.approxStorageMb),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
                     },
                 )
+            }
+
+            // Stopping is rare and clears the buffer, so it lives here rather than
+            // competing for space with Save on the main screen.
+            if (recording) {
+                item {
+                    Button(
+                        onClick = onStop,
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 8.dp),
+                    ) {
+                        Text("Stop listening")
+                    }
+                }
             }
         }
     }
