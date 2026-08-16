@@ -111,7 +111,7 @@ object Transcriber {
                             ""
                         }
                     }
-                    if (text.isNotBlank() && !isEchoOfPrevious(pieces.lastOrNull(), text)) {
+                    if (text.isNotBlank()) {
                         pieces += text
                         Log.i(TAG, "Chunk ${index + 1}/${chunks.size}: ${text.take(60)}")
                     }
@@ -121,7 +121,9 @@ object Transcriber {
             slice.delete()
 
             TranscriptionResult.Success(
-                text = pieces.joinToString(" ").trim(),
+                // Stitched, not concatenated: overlapping chunks hear the seam
+                // twice and rarely word for word.
+                text = TranscriptStitcher.stitch(pieces),
                 segments = chunks.size,
                 elapsedMs = System.currentTimeMillis() - started,
             )
@@ -308,13 +310,6 @@ object Transcriber {
             runCatching { recognizer.destroy() }
             runCatching { descriptor.close() }
         }
-    }
-
-    /** Overlapping chunks can both hear the same phrase; keep it once. */
-    private fun isEchoOfPrevious(previous: String?, current: String): Boolean {
-        if (previous == null) return false
-        val normalise = { text: String -> text.lowercase().filter { it.isLetterOrDigit() || it == ' ' } }
-        return normalise(previous).contains(normalise(current))
     }
 
     private fun writeSlice(source: File, chunk: Chunk, destination: File) {
