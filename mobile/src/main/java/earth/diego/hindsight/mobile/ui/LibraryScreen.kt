@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.paddingFromBaseline
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -54,7 +55,10 @@ import earth.diego.hindsight.mobile.ui.components.WaveformView
 import earth.diego.hindsight.mobile.ui.theme.hindsight
 
 /** Width of the time axis gutter. Every row hangs off this line. */
-private val AXIS = 72.dp
+private val AXIS = 64.dp
+
+/** Distance from the top of a row to the middle of its waveform. */
+private val WAVE_CENTRE = 30.dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -221,7 +225,7 @@ private fun QuietStretch(hours: Int) {
                 .width(AXIS)
                 .fillMaxSize()
                 .drawBehind {
-                    val x = size.width - 20.dp.toPx()
+                    val x = size.width - 14.dp.toPx()
                     drawLine(
                         color = rule,
                         start = Offset(x, 0f),
@@ -261,34 +265,36 @@ private fun SharedTransitionScope.Moment(
             .clickable(onClick = onClick)
             .height(86.dp),
     ) {
+        // The gutter reads top-down: the hour labels where its block begins, and
+        // the dot marks the waveform. Both sit on the same baseline as the thing
+        // they refer to, rather than floating in the middle of the row.
         Box(
             Modifier
                 .width(AXIS)
                 .fillMaxSize()
                 .drawBehind {
-                    val x = size.width - 20.dp.toPx()
+                    val x = size.width - 14.dp.toPx()
                     drawLine(rule, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())
-                    // A short tick joins the clip to the hour it belongs to.
-                    if (hour != null) {
-                        drawLine(
-                            rule,
-                            Offset(x, size.height / 2f),
-                            Offset(size.width, size.height / 2f),
-                            1.dp.toPx(),
-                        )
-                    }
-                    if (isPlaying) {
-                        drawCircle(signal, 3.5.dp.toPx(), Offset(x, size.height / 2f))
-                    }
+                    // The marker sits level with the waveform it belongs to.
+                    drawCircle(
+                        color = if (isPlaying) signal else rule,
+                        radius = if (isPlaying) 4.dp.toPx() else 2.5.dp.toPx(),
+                        center = Offset(x, WAVE_CENTRE.toPx()),
+                    )
                 },
-            contentAlignment = Alignment.CenterStart,
         ) {
             if (hour != null) {
                 Text(
                     hour,
-                    style = MaterialTheme.typography.displaySmall,
-                    color = hindsight.graphite,
-                    modifier = Modifier.padding(start = 18.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = hindsight.muted,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Right-aligned against the axis so 09, 10 and 23 line up,
+                        // and level with the waveform rather than the row.
+                        .padding(end = 24.dp)
+                        .paddingFromBaseline(top = WAVE_CENTRE + 6.dp),
                 )
             }
         }
@@ -296,8 +302,7 @@ private fun SharedTransitionScope.Moment(
         Column(
             Modifier
                 .weight(1f)
-                .padding(end = 20.dp),
-            verticalArrangement = Arrangement.Center,
+                .padding(end = 20.dp, top = 9.dp),
         ) {
             // The waveform is the clip's identity, and literally the same object
             // the player grows from — hence the shared key.
