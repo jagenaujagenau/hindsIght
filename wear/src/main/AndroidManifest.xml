@@ -47,6 +47,18 @@
             main way the app is meant to be used: when something just happened you
             have seconds, not enough time to find an icon.
         -->
+        <!--
+            Target of tile taps. Exported because the tile renderer launches it
+            from another process; it takes no data and only starts or saves.
+        -->
+        <activity
+            android:name=".tile.TileActionActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <service
             android:name=".tile.SaveTileService"
             android:exported="true"

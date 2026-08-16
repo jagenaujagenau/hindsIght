@@ -13,7 +13,6 @@ import androidx.wear.tiles.TileService
 import androidx.concurrent.futures.ResolvableFuture
 import com.google.common.util.concurrent.ListenableFuture
 import earth.diego.hindsight.service.RecorderBus
-import earth.diego.hindsight.service.RecorderService
 
 /**
  * A tile whose entire job is one tap.
@@ -26,8 +25,8 @@ class SaveTileService : TileService() {
 
     private companion object {
         const val RESOURCES_VERSION = "1"
-        const val ID_SAVE = "save"
-        const val ID_TOGGLE = "toggle"
+        const val ID_SAVE = TileActionActivity.ACTION_SAVE
+        const val ID_TOGGLE = TileActionActivity.ACTION_START
 
         /**
          * Tiles are snapshots, not live views. A short freshness interval keeps the
@@ -40,13 +39,10 @@ class SaveTileService : TileService() {
     override fun onTileRequest(
         requestParams: RequestBuilders.TileRequest,
     ): ListenableFuture<TileBuilders.Tile> {
-        // A LoadAction tap comes back as another tile request carrying the id of
-        // whatever was clicked — that is where the work happens, so the tap never
-        // has to launch an activity.
-        when (requestParams.currentState.lastClickableId) {
-            ID_SAVE -> RecorderService.save(this)
-            ID_TOGGLE -> RecorderService.start(this)
-        }
+        // Deliberately no side effects here. onTileRequest is a render, called on
+        // the freshness interval and whenever the tile scrolls into view, and the
+        // clicked id it carries is sticky — acting on it repeated a single tap
+        // forever. Taps go through TileActionActivity instead.
 
         val state = RecorderBus.capture.value
         val pending = RecorderBus.pendingUploads.value
@@ -150,7 +146,20 @@ class SaveTileService : TileService() {
                         ModifiersBuilders.Clickable.Builder()
                             .setId(id)
                             .setOnClick(
-                                ActionBuilders.LoadAction.Builder().build(),
+                                ActionBuilders.LaunchAction.Builder()
+                                    .setAndroidActivity(
+                                        ActionBuilders.AndroidActivity.Builder()
+                                            .setPackageName(packageName)
+                                            .setClassName(TileActionActivity::class.java.name)
+                                            .addKeyToExtraMapping(
+                                                TileActionActivity.EXTRA_ACTION,
+                                                ActionBuilders.AndroidStringExtra.Builder()
+                                                    .setValue(id)
+                                                    .build(),
+                                            )
+                                            .build(),
+                                    )
+                                    .build(),
                             )
                             .build(),
                     )
