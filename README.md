@@ -1,139 +1,184 @@
+<div align="center">
+
 # Hindsight
 
-*The last five minutes, always.*
+**A watch that is always listening, and remembers only the last few minutes.**
 
-A Wear OS app that continuously listens and keeps only the last *X* minutes. Press
-**SAVE** and that window is written to an `.m4a` and pushed to the paired phone,
-where a companion app lists and plays it.
+![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
+![Wear OS](https://img.shields.io/badge/Wear_OS-Compose_M3-4285F4?style=for-the-badge&logo=wearos&logoColor=white)
+![Android](https://img.shields.io/badge/Android-minSdk_26-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Compose](https://img.shields.io/badge/Jetpack_Compose-2025.10-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
 
-The watch is a buffer, not an archive: a saved clip is deleted from the watch the
-moment the phone confirms it landed.
+</div>
 
-## Modules
+## What is this?
 
-| Module    | What it is                                                          |
-|-----------|---------------------------------------------------------------------|
-| `:wear`   | Wear OS app — capture, ring buffer, clip assembly, transfer          |
-| `:mobile` | Phone companion — receives, stores and plays clips                   |
-| `:shared` | The Data Layer contract and audio parameters both sides must agree on |
+Hindsight records continuously on a Wear OS watch into a fixed-size ring buffer, keeping
+only the last *X* minutes and throwing the rest away. When something worth keeping has
+just been said, you tap the watch and that window is saved and sent to your phone, where
+you can scrub it, search it and keep it.
 
-Both apps use the applicationId `earth.diego.hindsight`. That is deliberate and
-required: the Data Layer only bridges apps sharing an applicationId **and** a
-signing key. Debug builds from the same machine share `~/.android/debug.keystore`,
-so pairing works out of the box.
+It solves the problem that you only know a moment mattered *after* it happened. The watch
+is a buffer, not an archive — a clip is deleted from it the moment the phone confirms the
+clip is safely on disk.
 
-## How the buffer works
+<div align="center">
+<img src="docs/screenshots/watch-wave.png" width="200" alt="The watch: a live waveform, tap to save"/>
+&nbsp;&nbsp;
+<img src="docs/screenshots/phone-library.png" width="200" alt="The phone: the day as a time axis"/>
+&nbsp;&nbsp;
+<img src="docs/screenshots/phone-player.png" width="200" alt="The player: scrubable waveform"/>
+</div>
 
-```
-AudioRecord (16 kHz mono PCM, blocking read — this paces the whole loop)
-    ↓
-MediaCodec AAC-LC @ 24 kbps  (hardware encoder, synchronous mode)
-    ↓  ADTS frames, 1024 samples = 64 ms each
-Ring buffer of ~30 s segment files    buffer/seg_00000000.aac …
-    oldest segment deleted once the window is full
-    ↓  on SAVE
-Pin the newest N segments → strip ADTS headers → MediaMuxer → clip_*.m4a
-```
+## Quick start
 
-**Nothing is re-encoded on save.** The AAC frames the encoder already produced are
-copied straight into an MP4 container, so saving 60 minutes costs the same CPU as
-saving 1 — a few hundred milliseconds of pure IO.
-
-**Trimming is frame-exact.** Because the recorder tracks frame counts per segment,
-a save drops leading frames until exactly *X* minutes remain, to a 64 ms
-granularity. It never returns a clip rounded up to a segment boundary.
-
-**A save never stalls capture.** `pinNewest` marks the chosen segments undeletable
-and the muxing runs off-thread; eviction that would have deleted a pinned file
-defers until the save releases it.
-
-### Storage and power
-
-| Retention | Ring buffer on disk |
-|-----------|---------------------|
-| 1 min     | ~0.3 MB             |
-| 5 min     | ~1.0 MB             |
-| 15 min    | ~2.7 MB             |
-| 30 min    | ~5.4 MB             |
-| 60 min    | ~10.6 MB            |
-
-The ring is sized from the *current* retention setting, not the 60-minute maximum,
-so a 5-minute user pays for 5 minutes. Lowering the setting reclaims the space
-immediately.
-
-Other choices made for battery and CPU:
-
-- One thread runs capture, encode and disk writes; there is no timer and no
-  polling. `AudioRecord.read` blocking is the clock.
-- Cross-thread commands arrive on a lock-free queue drained between iterations
-  (worst case one 64 ms frame of latency).
-- The encoder writes through an 8 KB buffer — roughly one `write` syscall every
-  2.7 s, which also caps loss to ~3 s if the process is killed.
-- UI state is published at ~4 Hz, not per frame.
-- Compose icon libraries are deliberately not used on the watch; the controls are
-  text. Release APK: **2.5 MB** (watch), **1.1 MB** (phone).
-
-## Transfer
-
-The phone advertises the capability `hindsight_clip_receiver`
-(`mobile/src/main/res/values/wear.xml`). The watch resolves it, opens a
-`ChannelClient` channel at `/clip/<filename>.m4a` and streams the file.
-
-Delivery is driven by a WorkManager job with exponential backoff, so clips saved
-while the phone is out of range queue in `outbox/` and go out when it returns. The
-phone writes to a `.part` file and renames on success, so an interrupted transfer
-never surfaces a truncated clip.
-
-**Transport success is not delivery.** `ChannelClient.sendFile` resolves once the
-bytes reach the local Bluetooth buffer — the peer may never have seen them. So the
-watch does not delete anything on send. After writing a clip to disk the phone
-sends `/clip-ack/<filename>`, and only that message authorises the watch to
-reclaim its copy. A transfer that dies in flight therefore costs a retry, not a
-recording. Re-sending a clip the phone already holds is harmless: it re-acks.
-
-Two Wear-specific traps are worth calling out, because both fail *silently*:
-
-- **Never put `android:permission` on a `WearableListenerService`.** That attribute
-  constrains the caller, and Google Play services does not hold
-  `BIND_LISTENER_SERVICE`. Declaring it makes GMS permanently unable to bind, so
-  channel events queue up and are dropped with a `SecurityException` in GMS's own
-  log — the app sees nothing at all.
-- **Never close a channel straight after `sendFile`.** It aborts the in-flight
-  transfer. `sendFile` closes the output stream itself; wait for `onOutputClosed`.
-
-## Build and run
-
-Requires JDK 17 and the Android SDK (compileSdk 35).
+Requires **JDK 17** and the Android SDK (compileSdk 35). `adb` lives at
+`~/Library/Android/sdk/platform-tools/adb` on macOS if it isn't on your `PATH`.
 
 ```bash
+git clone https://github.com/jagenaujagenau/hindsIght.git
+cd hindsIght
 ./gradlew :wear:assembleDebug :mobile:assembleDebug
-./gradlew :wear:testDebugUnitTest
 ```
 
-Install to a paired pair of devices:
+Install the **phone app first** — it advertises the capability the watch looks for:
 
 ```bash
-adb -s <phone-serial> install -r mobile/build/outputs/apk/debug/mobile-debug.apk
-adb -s <watch-serial> install -r wear/build/outputs/apk/debug/wear-debug.apk
+adb -s <phone-serial>  install -r mobile/build/outputs/apk/debug/mobile-debug.apk
+adb -s <watch-serial>  install -r wear/build/outputs/apk/debug/wear-debug.apk
 ```
 
-Install the phone app **first** — its capability has to be registered before the
-watch will find a node to send to. If you install in the other order, the first
-upload attempt returns `retry` and WorkManager delivers it a few seconds later
-anyway.
+Use the **debug** APKs. The release outputs are unsigned, and more importantly the Data
+Layer only bridges two apps that share an `applicationId` *and* a signing key — debug
+builds from one machine share `~/.android/debug.keystore`, so pairing works by default.
 
-On the watch: grant the microphone permission, tap **REC**, tap **···** to change
-how far back **SAVE** reaches.
+On the watch: grant the microphone permission. Recording starts as soon as the app opens.
 
-## Tests
+| Gesture | Action |
+|---|---|
+| Tap | Save the last window |
+| Long-press | Stop listening |
+| Tap while stopped | Resume |
+| Swipe | Settings |
 
-`./gradlew :wear:testDebugUnitTest` covers the two places a bug would silently
-corrupt audio rather than crash:
+## How it works
 
-- ADTS header write/read round-trip, and that the header encodes 16 kHz mono
-  AAC-LC with a correct frame length.
-- Ring buffer eviction, retention shrink reclaiming storage, and that pinned
-  segments survive eviction during a save then are actually deleted on release.
+```mermaid
+graph LR
+    Mic["Microphone<br/>16 kHz mono"] --> Enc["AAC-LC encoder<br/>24 kbps"]
+    Enc --> Ring["Ring buffer<br/>~30 s segments"]
+    Ring -->|"tap = save"| Clip["clip.m4a<br/>remuxed, not re-encoded"]
+    Clip --> Out["outbox/"]
+    Out -->|"Data Layer channel"| Phone["Phone receives<br/>writes .part, renames"]
+    Phone -->|"/clip-ack/&lt;name&gt;"| Del["Watch deletes its copy"]
+    Phone --> Peaks["Waveform sidecar"]
+    Phone --> Text["Transcript sidecar"]
+```
 
-Capture, encoding and the Data Layer transfer need real hardware; they are not
+**Nothing is re-encoded when you save.** The AAC frames the encoder already produced are
+copied straight into an MP4 container, so saving 60 minutes costs the same as saving one —
+a few hundred milliseconds of IO. Trimming is exact to a 64 ms frame.
+
+**Transport success is not delivery.** `sendFile` resolves when bytes reach the local
+Bluetooth buffer, which says nothing about the phone. The watch therefore deletes nothing
+until the phone sends `/clip-ack/<filename>`, after the file is renamed into place. A
+transfer that dies costs a retry, not a recording.
+
+**Storage scales with the setting, not the maximum.** The ring is sized from the current
+retention, so a 1-minute user pays ~0.3 MB rather than the 10.6 MB a 60-minute window needs.
+
+| Retention | On watch |
+|---|---|
+| 1 min | ~0.3 MB |
+| 5 min | ~1.0 MB |
+| 15 min | ~2.7 MB |
+| 30 min | ~5.4 MB |
+| 60 min | ~10.6 MB |
+
+## The two apps
+
+**Watch** — one screen, no buttons. A live waveform in four styles (bars, oscilloscope
+line, concentric pulse, dots), six colour options, and three sensitivity settings. Capture,
+encode and disk writes share a single thread paced by a blocking `AudioRecord.read`; there
+is no timer and no polling. A tile offers one-tap save from the watch face, and an
+OngoingActivity chip keeps the running recorder visible.
+
+**Phone** — the archive, laid out as a time axis rather than a list. Each clip is drawn as
+its own waveform, so you recognise a recording by its shape; stretches where nothing was
+captured are drawn as *"12 quiet hours"* rather than closed up. Tapping a clip grows its
+waveform into the player via a shared element. Scrub, skip, change speed, rename, share,
+and delete with undo.
+
+<div align="center">
+<img src="docs/screenshots/phone-dark.png" width="220" alt="Dark theme"/>
+&nbsp;&nbsp;
+<img src="docs/screenshots/watch-settings.png" width="220" alt="Watch settings"/>
+</div>
+
+**Transcription** is on-device via `SpeechRecognizer`, so no audio leaves the phone. It is
+positioned as a search aid, not a record — see [Known gaps](#known-gaps).
+
+## Project structure
+
+```
+docs/
+  screenshots/            Real captures from a Pixel Watch 2 and Pixel 10
+gradle/
+  wrapper/
+  libs.versions.toml      Single source of dependency versions
+mobile/                   Phone app: archive, player, transcripts
+  src/main/java/…/audio/        Waveform envelope extraction, PCM decode
+  src/main/java/…/data/         ClipStore — files plus sidecars, no database
+  src/main/java/…/player/       MediaPlayer wrapper with real seeking
+  src/main/java/…/sync/         Receives clips, acknowledges, answers sync requests
+  src/main/java/…/transcribe/   On-device speech, chunking, transcript stitching
+  src/main/java/…/ui/           Timeline, player, theme
+shared/                   The Data Layer contract both apps compile against
+wear/                     Watch app: capture, ring buffer, transfer
+  src/main/java/…/audio/        AudioRecord → AAC → ring buffer → clip assembly
+  src/main/java/…/service/      Foreground recorder service
+  src/main/java/…/sync/         Outbox, upload worker, ack and reconnect listener
+  src/main/java/…/tile/         One-tap save tile
+  src/main/java/…/ui/           The wave
+build.gradle.kts
+settings.gradle.kts
+```
+
+Both modules use the applicationId `earth.diego.hindsight`. That is deliberate and
+required — the Data Layer pairs apps by applicationId and signing key, not by module.
+
+## Testing
+
+```bash
+./gradlew :wear:testDebugUnitTest :mobile:testDebugUnitTest
+```
+
+21 unit tests, aimed at the places where a bug corrupts data silently rather than crashing:
+
+| Suite | Covers |
+|---|---|
+| `AdtsTest` | ADTS header round-trip; 16 kHz mono AAC-LC framing |
+| `SegmentRingTest` | Ring eviction, retention shrink, pinned segments surviving a save |
+| `TranscriptStitcherTest` | Splicing overlapping transcript chunks without stutter |
+| `TimelineTest` | Hour marks, quiet stretches, never spanning a day boundary |
+
+Capture, encoding, the Data Layer transfer and the UI need real hardware and are not
 covered by unit tests.
+
+## Known gaps
+
+- **Transcription recall is partial.** Measured on a Pixel 10, the on-device recogniser
+  stops at the first substantial silence, so audio is chunked with overlap. Different
+  chunk boundaries surface different passages. It reliably finds *some* of what was said —
+  good for locating roughly when something was discussed, not a verbatim record. An hour of
+  audio is roughly 40 minutes of background work.
+- **The Gradle wrapper is on 9.0** while AGP is 8.7.3, which is outside AGP's documented
+  support matrix. It currently builds clean, but it is untested ground.
+- **Release builds are unsigned** and lint is disabled for them: AGP 8.7.3's bundled lint
+  throws `IncompatibleClassChangeError` against the newer androidx artifacts.
+- No CI, and no signing configuration for distribution.
+
+## License
+
+No licence has been chosen, so default copyright applies and no permissions are granted.
+Add a `LICENSE` file if you want that to change.
