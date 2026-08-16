@@ -70,6 +70,11 @@
                 <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
                 <data android:scheme="wear" android:host="*" />
             </intent-filter>
+            <!-- The watch's reply to a sync request. -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" />
+            </intent-filter>
         </service>
 
     </application>

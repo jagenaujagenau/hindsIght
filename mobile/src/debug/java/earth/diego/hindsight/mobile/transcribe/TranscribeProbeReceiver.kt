@@ -28,6 +28,19 @@ class TranscribeProbeReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         ClipStore.refresh(app)
 
+        // --ez sync true: exercises the pull-to-sync round trip without a finger.
+        if (intent.getBooleanExtra("sync", false)) {
+            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+                Log.i(TAG, "PROBE sync request -> ${earth.diego.hindsight.mobile.sync.WatchSync.requestSync(app)}")
+            }
+            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+                earth.diego.hindsight.mobile.sync.WatchSyncStatus.pending.collect {
+                    Log.i(TAG, "PROBE watch reports pending=$it")
+                }
+            }
+            return
+        }
+
         val requested = intent.getStringExtra("clip")
         val clip = ClipStore.clips.value.let { clips ->
             requested?.let { name -> clips.firstOrNull { it.id == name } } ?: clips.firstOrNull()

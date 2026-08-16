@@ -63,11 +63,16 @@
 
         <!-- No android:permission — see the mobile manifest for why. -->
         <service
-            android:name=".sync.ClipAckService"
+            android:name=".sync.SyncListenerService"
             android:exported="true">
             <!-- Scheme + host only; the path is validated in code. See mobile manifest. -->
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" />
+            </intent-filter>
+            <!-- Wakes us when the phone becomes reachable again. -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CAPABILITY_CHANGED" />
                 <data android:scheme="wear" android:host="*" />
             </intent-filter>
         </service>

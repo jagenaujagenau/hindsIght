@@ -36,6 +36,14 @@ class ClipReceiverService : WearableListenerService() {
         const val COPY_BUFFER = 32 * 1024
     }
 
+    /** The watch's answer to a sync request: how many clips it still holds. */
+    override fun onMessageReceived(messageEvent: com.google.android.gms.wearable.MessageEvent) {
+        if (messageEvent.path != WearProtocol.MESSAGE_SYNC_STATUS) return
+        val pending = String(messageEvent.data).toIntOrNull() ?: return
+        Log.i(TAG, "Watch reports $pending clip(s) pending")
+        WatchSyncStatus.report(pending)
+    }
+
     override fun onChannelOpened(channel: ChannelClient.Channel) {
         val fileName = WearProtocol.fileNameFromChannelPath(channel.path) ?: run {
             Log.w(TAG, "Ignoring unexpected channel path ${channel.path}")

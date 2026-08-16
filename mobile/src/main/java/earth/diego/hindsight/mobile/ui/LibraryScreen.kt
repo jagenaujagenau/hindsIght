@@ -1,6 +1,8 @@
 package earth.diego.hindsight.mobile.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -53,6 +56,8 @@ fun LibraryScreen(
     clips: List<Clip>,
     playingClipId: String?,
     snackbarHostState: SnackbarHostState,
+    isSyncing: Boolean,
+    onSync: () -> Unit,
     onOpen: (Clip) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -95,6 +100,13 @@ fun LibraryScreen(
                 )
             }
 
+            // Pull asks the watch to send what it is holding — the phone cannot
+            // fetch clips itself, so this is a request, not a download.
+            PullToRefreshBox(
+                isRefreshing = isSyncing,
+                onRefresh = onSync,
+                modifier = Modifier.fillMaxSize(),
+            ) {
             when {
                 clips.isEmpty() -> EmptyState(
                     "Nothing here yet",
@@ -126,6 +138,7 @@ fun LibraryScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -196,6 +209,8 @@ private fun EmptyState(title: String, body: String) {
     Box(
         Modifier
             .fillMaxSize()
+            // Scrollable so the pull gesture works even with nothing in the list.
+            .verticalScroll(rememberScrollState())
             .padding(32.dp),
         contentAlignment = Alignment.Center,
     ) {

@@ -26,6 +26,16 @@ object WearProtocol {
      */
     const val MESSAGE_ACK_PREFIX = "/clip-ack/"
 
+    /**
+     * Phone -> watch: "send me anything you are holding". Answers the case where
+     * the watch queued clips out of range and WorkManager's exponential backoff
+     * has grown to hours by the time the phone is reachable again.
+     */
+    const val MESSAGE_SYNC_REQUEST = "/sync/request"
+
+    /** Watch -> phone: how many clips are still waiting, as decimal text. */
+    const val MESSAGE_SYNC_STATUS = "/sync/status"
+
     fun clipChannelPath(fileName: String): String = CHANNEL_CLIP_PREFIX + fileName
 
     fun ackMessagePath(fileName: String): String = MESSAGE_ACK_PREFIX + fileName

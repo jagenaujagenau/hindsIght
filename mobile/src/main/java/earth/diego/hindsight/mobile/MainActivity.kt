@@ -35,6 +35,9 @@ import earth.diego.hindsight.mobile.audio.WaveformWorker
 import earth.diego.hindsight.mobile.data.Clip
 import earth.diego.hindsight.mobile.data.ClipStore
 import earth.diego.hindsight.mobile.player.ClipPlayer
+import earth.diego.hindsight.mobile.sync.SyncOutcome
+import earth.diego.hindsight.mobile.sync.WatchSync
+import earth.diego.hindsight.mobile.sync.WatchSyncStatus
 import earth.diego.hindsight.mobile.ui.LibraryScreen
 import earth.diego.hindsight.mobile.transcribe.TranscribeWorker
 import earth.diego.hindsight.mobile.ui.PlayerScreen
@@ -127,6 +130,21 @@ private fun HindsightApp(player: ClipPlayer) {
         }
     }
 
+    // Pull-to-sync: ask the watch to flush its outbox, and report what it says.
+    var syncing by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        WatchSyncStatus.pending.collect { pending ->
+            syncing = false
+            snackbarHostState.showSnackbar(
+                when (pending) {
+                    0 -> "Watch has nothing waiting"
+                    1 -> "Sending 1 clip from your watch"
+                    else -> "Sending $pending clips from your watch"
+                },
+            )
+        }
+    }
+
     BackHandler(enabled = openClipId != null) { openClipId = null }
 
     AnimatedContent(
@@ -145,6 +163,32 @@ private fun HindsightApp(player: ClipPlayer) {
                 clips = clips,
                 playingClipId = playback.clipId.takeIf { playback.playing },
                 snackbarHostState = snackbarHostState,
+                isSyncing = syncing,
+                onSync = {
+                    syncing = true
+                    scope.launch {
+                        ClipStore.refresh(context)
+                        when (val outcome = WatchSync.requestSync(context)) {
+                            is SyncOutcome.Asked -> {
+                                // The watch answers on a Play services callback; if it
+                                // never does, do not spin forever.
+                                delay(6_000)
+                                if (syncing) {
+                                    syncing = false
+                                    snackbarHostState.showSnackbar("Watch did not answer")
+                                }
+                            }
+                            SyncOutcome.NoWatch -> {
+                                syncing = false
+                                snackbarHostState.showSnackbar("No watch connected")
+                            }
+                            is SyncOutcome.Failed -> {
+                                syncing = false
+                                snackbarHostState.showSnackbar(outcome.reason)
+                            }
+                        }
+                    }
+                },
                 onOpen = { selected ->
                     openClipId = selected.id
                     player.open(selected.id, selected.file)
