@@ -51,7 +51,7 @@ class WaveformWorker(
         }
         Log.i(TAG, "Built $built of ${pending.size} waveforms")
 
-        ClipStore.refresh(applicationContext)
+        ClipStore.refreshNow(applicationContext)
         Result.success()
     }
 }

@@ -2,6 +2,8 @@ package earth.diego.hindsight.mobile.data
 
 import android.content.Context
 import earth.diego.hindsight.mobile.audio.Waveform
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,10 +25,15 @@ data class Clip(
      * nature — see [earth.diego.hindsight.mobile.transcribe.Transcriber].
      */
     val transcript: String? = null,
+    /**
+     * Resolved once when the library is read, never on demand. As a computed
+     * property this stat ran per row on every recomposition — on the main thread,
+     * during scrolling — because it was used as a LaunchedEffect key.
+     */
+    val hasWaveform: Boolean = false,
 ) {
     val id: String get() = file.name
     val displayTitle: String get() = title?.takeIf { it.isNotBlank() } ?: ClipStore.timeOfDay(recordedAt)
-    val hasWaveform: Boolean get() = Waveform.sidecarFor(file).exists()
 }
 
 /**
@@ -56,7 +63,15 @@ object ClipStore {
 
     fun transcriptFile(clip: File) = File(clip.parentFile, clip.name + ".txt")
 
-    fun refresh(context: Context) {
+    /**
+     * Re-reads the library. Suspends because it is several file operations per
+     * clip — including reading each transcript — which is far too much for the
+     * main thread once there are more than a handful of recordings.
+     */
+    suspend fun refresh(context: Context) = withContext(Dispatchers.IO) { refreshNow(context) }
+
+    /** For callers already on a background thread, such as services and workers. */
+    fun refreshNow(context: Context) {
         _clips.value = directory(context)
             .listFiles { f -> f.isFile && f.extension == "m4a" }
             .orEmpty()
@@ -77,22 +92,23 @@ object ClipStore {
             transcript = runCatching {
                 transcriptFile(file).takeIf { it.exists() }?.readText()
             }.getOrNull(),
+            hasWaveform = Waveform.sidecarFor(file).exists(),
         )
     }
 
-    fun rename(context: Context, clip: Clip, title: String) {
+    suspend fun rename(context: Context, clip: Clip, title: String) = withContext(Dispatchers.IO) {
         val target = titleFile(clip.file)
         if (title.isBlank()) target.delete() else target.writeText(title.trim())
-        refresh(context)
+        refreshNow(context)
     }
 
     fun saveTranscript(context: Context, clip: File, text: String) {
         transcriptFile(clip).writeText(text)
-        refresh(context)
+        refreshNow(context)
     }
 
     /** Moves a clip and its sidecars to the trash. Reversible via [restore]. */
-    fun moveToTrash(context: Context, clip: Clip): List<Pair<File, File>> {
+    suspend fun moveToTrash(context: Context, clip: Clip): List<Pair<File, File>> = withContext(Dispatchers.IO) {
         val moved = mutableListOf<Pair<File, File>>()
         val bin = trash(context)
         listOfNotNull(
@@ -104,16 +120,16 @@ object ClipStore {
             val destination = File(bin, source.name)
             if (source.renameTo(destination)) moved += source to destination
         }
-        refresh(context)
-        return moved
+        refreshNow(context)
+        moved
     }
 
-    fun restore(context: Context, moved: List<Pair<File, File>>) {
+    suspend fun restore(context: Context, moved: List<Pair<File, File>>) = withContext(Dispatchers.IO) {
         moved.forEach { (original, inTrash) -> inTrash.renameTo(original) }
-        refresh(context)
+        refreshNow(context)
     }
 
-    fun purge(moved: List<Pair<File, File>>) {
+    suspend fun purge(moved: List<Pair<File, File>>) = withContext(Dispatchers.IO) {
         moved.forEach { (_, inTrash) -> inTrash.delete() }
     }
 

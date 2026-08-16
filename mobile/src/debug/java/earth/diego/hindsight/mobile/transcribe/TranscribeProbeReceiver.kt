@@ -26,7 +26,7 @@ class TranscribeProbeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext
-        ClipStore.refresh(app)
+        ClipStore.refreshNow(app)
 
         // --ez sync true: exercises the pull-to-sync round trip without a finger.
         if (intent.getBooleanExtra("sync", false)) {

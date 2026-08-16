@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -102,7 +103,7 @@ fun SharedTransitionScope.LibraryScreen(
                 rows.isEmpty() -> Empty("No matches", "Nothing here mentions “$query”.")
 
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(bottom = 40.dp),
+                    contentPadding = PaddingValues(bottom = 48.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(rows, key = { it.key }) { row ->
@@ -135,7 +136,10 @@ private fun TopBar(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 10.dp),
+            // The app draws edge to edge, and this replaced a TopAppBar, which was
+            // the thing that used to inset for the status bar.
+            .statusBarsPadding()
+            .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (searching) {

@@ -42,6 +42,7 @@ import earth.diego.hindsight.mobile.sync.SyncOutcome
 import earth.diego.hindsight.mobile.sync.WatchSync
 import earth.diego.hindsight.mobile.sync.WatchSyncStatus
 import earth.diego.hindsight.mobile.ui.LibraryScreen
+import earth.diego.hindsight.mobile.ui.forgetPeaks
 import earth.diego.hindsight.mobile.transcribe.TranscribeWorker
 import earth.diego.hindsight.mobile.ui.PlayerScreen
 import earth.diego.hindsight.mobile.ui.components.TranscriptState
@@ -206,13 +207,15 @@ private fun HindsightApp(player: ClipPlayer) {
                 onSeekFraction = player::seekToFraction,
                 onSkip = player::skip,
                 onSpeed = player::setSpeed,
-                onRename = { ClipStore.rename(context, clip, it) },
+                onRename = { title -> scope.launch { ClipStore.rename(context, clip, title) } },
                 onShare = { shareClip(context, clip) },
                 onDelete = {
-                    val moved = ClipStore.moveToTrash(context, clip)
                     if (playback.clipId == clip.id) player.release()
+                    val deleted = clip
                     openClipId = null
                     scope.launch {
+                        val moved = ClipStore.moveToTrash(context, deleted)
+                        forgetPeaks(deleted.id)
                         val result = snackbarHostState.showSnackbar(
                             message = "Clip deleted",
                             actionLabel = "Undo",

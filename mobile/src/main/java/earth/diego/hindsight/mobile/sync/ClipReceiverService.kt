@@ -63,7 +63,7 @@ class ClipReceiverService : WearableListenerService() {
             check(partial.length() > 0) { "Received an empty clip" }
             check(partial.renameTo(destination)) { "Could not finalise ${destination.name}" }
 
-            ClipStore.refresh(this)
+            ClipStore.refreshNow(this)
             // Build the envelope now so opening the clip later is instant.
             WaveformWorker.enqueue(this)
             notifyArrival(fileName)
