@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -44,20 +43,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
 import earth.diego.hindsight.mobile.data.Clip
+import androidx.compose.foundation.clickable
 import earth.diego.hindsight.mobile.data.ClipStore
 import earth.diego.hindsight.mobile.player.PlaybackState
 import earth.diego.hindsight.mobile.ui.components.TranscriptPanel
 import earth.diego.hindsight.mobile.ui.components.TranscriptState
 import earth.diego.hindsight.mobile.ui.components.WaveformView
+import earth.diego.hindsight.mobile.ui.theme.hindsight
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 
 private val SPEEDS = listOf(0.75f, 1f, 1.5f, 2f)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
-fun PlayerScreen(
+fun SharedTransitionScope.PlayerScreen(
     clip: Clip,
-    peaks: FloatArray?,
+    animatedVisibilityScope: AnimatedContentScope,
     playback: PlaybackState,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -118,11 +124,16 @@ fun PlayerScreen(
 
             Spacer(Modifier.height(28.dp))
 
+            val peaks = rememberPeaks(clip)
             WaveformView(
                 peaks = peaks,
                 progress = playback.progress,
                 onSeek = onSeekFraction,
                 height = 180.dp,
+                modifier = Modifier.sharedElement(
+                    rememberSharedContentState(key = "wave-${clip.id}"),
+                    animatedVisibilityScope,
+                ),
             )
 
             if (peaks == null) {
@@ -141,12 +152,13 @@ fun PlayerScreen(
             ) {
                 Text(
                     ClipStore.formatPosition(playback.positionMs),
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = hindsight.signal,
                 )
                 Text(
                     ClipStore.formatPosition(playback.durationMs),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = hindsight.muted,
                 )
             }
 
@@ -159,14 +171,20 @@ fun PlayerScreen(
                     Icon(
                         Icons.Filled.Replay10,
                         contentDescription = "Back 10 seconds",
-                        modifier = Modifier.size(32.dp),
+                        tint = hindsight.muted,
+                        modifier = Modifier.size(30.dp),
                     )
                 }
+                // Graphite, not signal. The signal colour means "where you are in
+                // this recording"; spending it on a button would dilute that.
                 FilledIconButton(
                     onClick = onTogglePlay,
-                    modifier = Modifier.size(76.dp),
+                    modifier = Modifier.size(68.dp),
                     shape = CircleShape,
-                    colors = IconButtonDefaults.filledIconButtonColors(),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = hindsight.graphite,
+                        contentColor = hindsight.paper,
+                    ),
                 ) {
                     Icon(
                         if (playback.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -178,18 +196,25 @@ fun PlayerScreen(
                     Icon(
                         Icons.Filled.Forward10,
                         contentDescription = "Forward 10 seconds",
-                        modifier = Modifier.size(32.dp),
+                        tint = hindsight.muted,
+                        modifier = Modifier.size(30.dp),
                     )
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(24.dp))
+            // Set as type rather than chips: four bordered pills would be more
+            // furniture than this screen can carry.
+            Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
                 SPEEDS.forEach { speed ->
-                    FilterChip(
-                        selected = playback.speed == speed,
-                        onClick = { onSpeed(speed) },
-                        label = { Text(if (speed == 1f) "1×" else "${speed}×") },
+                    val selected = playback.speed == speed
+                    Text(
+                        text = if (speed == 1f) "1×" else "${speed}×",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) hindsight.signal else hindsight.muted,
+                        modifier = Modifier
+                            .clickable { onSpeed(speed) }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
                     )
                 }
             }

@@ -43,13 +43,15 @@ fun WaveformView(
     modifier: Modifier = Modifier,
     height: Dp = 120.dp,
     barCount: Int = 96,
+    /** Library rows show the shape but are tapped to open, not scrubbed. */
+    interactive: Boolean = true,
 ) {
     val haptics = LocalHapticFeedback.current
     var dragFraction by remember { mutableStateOf<Float?>(null) }
     var width by remember { mutableFloatStateOf(1f) }
 
-    val played = androidx.compose.material3.MaterialTheme.colorScheme.primary
-    val remaining = androidx.compose.material3.MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+    val played = earth.diego.hindsight.mobile.ui.theme.hindsight.signal
+    val remaining = earth.diego.hindsight.mobile.ui.theme.hindsight.trace
 
     // While dragging, follow the finger rather than the player, so the waveform
     // never fights the seek that is still catching up.
@@ -64,14 +66,14 @@ fun WaveformView(
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(peaks) {
+                .then(if (!interactive) Modifier else Modifier.pointerInput(peaks) {
                     width = size.width.toFloat()
                     detectTapGestures { offset ->
                         haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                         onSeek((offset.x / size.width).coerceIn(0f, 1f))
                     }
-                }
-                .pointerInput(peaks) {
+                })
+                .then(if (!interactive) Modifier else Modifier.pointerInput(peaks) {
                     width = size.width.toFloat()
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
@@ -85,7 +87,7 @@ fun WaveformView(
                     ) { change, _ ->
                         dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
                     }
-                }
+                })
                 .drawBehind {
                     drawWaveform(peaks, barCount, shown, played, remaining)
                 },

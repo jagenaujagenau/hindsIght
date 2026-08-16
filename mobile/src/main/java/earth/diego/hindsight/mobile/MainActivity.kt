@@ -11,6 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -78,6 +81,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun HindsightApp(player: ClipPlayer) {
     val context = LocalContext.current
@@ -89,31 +93,6 @@ private fun HindsightApp(player: ClipPlayer) {
 
     var openClipId by remember { mutableStateOf<String?>(null) }
     val openClip = remember(clips, openClipId) { clips.firstOrNull { it.id == openClipId } }
-
-    // Peaks are read off the main thread; a missing sidecar simply draws flat
-    // until the worker catches up.
-    var peaks by remember { mutableStateOf<FloatArray?>(null) }
-    LaunchedEffect(openClip?.id, openClip?.hasWaveform) {
-        peaks = null
-        val clip = openClip ?: return@LaunchedEffect
-        peaks = withContext(Dispatchers.IO) {
-            Waveform.read(clip.file)?.let(Waveform::normalised)
-        }
-        // Sidecar not ready yet — poll gently rather than making the user leave
-        // and come back.
-        if (peaks == null) {
-            repeat(10) {
-                delay(1_500)
-                val ready = withContext(Dispatchers.IO) {
-                    Waveform.read(clip.file)?.let(Waveform::normalised)
-                }
-                if (ready != null) {
-                    peaks = ready
-                    return@LaunchedEffect
-                }
-            }
-        }
-    }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val notifications = rememberLauncherForActivityResult(
@@ -147,20 +126,18 @@ private fun HindsightApp(player: ClipPlayer) {
 
     BackHandler(enabled = openClipId != null) { openClipId = null }
 
-    AnimatedContent(
-        targetState = openClip,
-        transitionSpec = {
-            if (targetState != null) {
-                (slideInHorizontally { it / 4 } + fadeIn()) togetherWith fadeOut()
-            } else {
-                fadeIn() togetherWith (slideOutHorizontally { it / 4 } + fadeOut())
-            }
-        },
-        label = "screen",
-    ) { clip ->
+    // One orchestrated moment: the row's waveform is the same object as the
+    // player's, so tapping a clip grows it rather than replacing the screen.
+    SharedTransitionLayout {
+        AnimatedContent(
+            targetState = openClip,
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
+            label = "screen",
+        ) { clip ->
         if (clip == null) {
             LibraryScreen(
                 clips = clips,
+                animatedVisibilityScope = this@AnimatedContent,
                 playingClipId = playback.clipId.takeIf { playback.playing },
                 snackbarHostState = snackbarHostState,
                 isSyncing = syncing,
@@ -216,10 +193,10 @@ private fun HindsightApp(player: ClipPlayer) {
 
             PlayerScreen(
                 clip = clip,
+                animatedVisibilityScope = this@AnimatedContent,
                 transcript = transcriptState,
                 onTranscribe = { TranscribeWorker.start(context, clip.id) },
                 onCancelTranscribe = { TranscribeWorker.cancel(context, clip.id) },
-                peaks = peaks,
                 playback = playback,
                 onBack = { openClipId = null },
                 onTogglePlay = {
@@ -248,6 +225,7 @@ private fun HindsightApp(player: ClipPlayer) {
                     }
                 },
             )
+        }
         }
     }
 }

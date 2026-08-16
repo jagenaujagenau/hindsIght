@@ -29,9 +29,6 @@ data class Clip(
     val hasWaveform: Boolean get() = Waveform.sidecarFor(file).exists()
 }
 
-/** A day's worth of clips, for a sectioned library. */
-data class ClipDay(val label: String, val clips: List<Clip>)
-
 /**
  * The phone is the archive. Clips are plain files; everything else about them —
  * a title, an amplitude envelope — lives in small sidecars next to the audio, so
@@ -120,12 +117,6 @@ object ClipStore {
         moved.forEach { (_, inTrash) -> inTrash.delete() }
     }
 
-    /** Groups by calendar day so the library reads as a timeline, not a heap. */
-    fun groupByDay(clips: List<Clip>): List<ClipDay> =
-        clips.groupBy { startOfDay(it.recordedAt) }
-            .toSortedMap(compareByDescending { it })
-            .map { (day, items) -> ClipDay(dayLabel(day), items) }
-
     private fun startOfDay(millis: Long): Long = Calendar.getInstance().apply {
         timeInMillis = millis
         set(Calendar.HOUR_OF_DAY, 0)
@@ -134,7 +125,7 @@ object ClipStore {
         set(Calendar.MILLISECOND, 0)
     }.timeInMillis
 
-    private fun dayLabel(dayStart: Long): String {
+    fun dayLabel(dayStart: Long): String {
         val today = startOfDay(System.currentTimeMillis())
         val oneDay = 24L * 60 * 60 * 1000
         return when (dayStart) {
