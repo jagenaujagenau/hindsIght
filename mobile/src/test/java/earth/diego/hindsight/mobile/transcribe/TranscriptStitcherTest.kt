@@ -19,7 +19,11 @@ class TranscriptStitcherTest {
         assertEquals("hello there general kenobi", text)
     }
 
-    /** The case observed on a real recording, where neither side contains the other. */
+    /**
+     * The shape observed on a real recording: two chunks agree on a run of words
+     * across the seam but disagree on the word either side of it, so neither
+     * rendering contains the other.
+     */
     @Test
     fun `splices a seam the two chunks disagree about`() {
         val first = "we talked about the schedule for a while " +
@@ -28,12 +32,12 @@ class TranscriptStitcherTest {
 
         val text = TranscriptStitcher.append(first, second)
 
-        // The shared run appears exactly once, and the trailing mis-hearing of it
-        // ("get known") is gone.
+        // The shared run appears exactly once, and the trailing mis-hearing of the
+        // word after it is gone.
         assertEquals(1, Regex("the second half of the plan").findAll(text).count())
-        assertFalse(text.contains("get known"))
+        assertFalse(text.contains("clearly"))
         assertTrue(text.startsWith("we talked about the schedule"))
-        assertTrue(text.endsWith("phase one was a success"))
+        assertTrue(text.endsWith("moving on"))
     }
 
     @Test

@@ -5,9 +5,9 @@ package earth.diego.hindsight.mobile.transcribe
  *
  * Chunks deliberately overlap by a few seconds so speech on a boundary is heard
  * whole by at least one of them. The cost is that the shared audio is recognised
- * twice, and rarely identically — one real example produced
- * "...and mentioned the second half of the plan clearly" followed by
- * "Mentioning the second half of the plan properly...", which reads as a stutter.
+ * twice, and rarely identically. A real recording produced two renderings that
+ * agreed on a run of words across the seam but disagreed on the word either side
+ * of it, which reads as a stutter when the chunks are simply concatenated.
  *
  * An exact-containment check cannot catch that, because neither rendering
  * contains the other. So instead we look for the longest run of words the two
