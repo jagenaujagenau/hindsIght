@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Transcription runs as foreground work: the platform drops the speech
@@ -24,6 +25,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            WorkManager declares SystemForegroundService with no foregroundServiceType,
+            so passing DATA_SYNC in ForegroundInfo throws
+            "foregroundServiceType 0x1 is not a subset of ... 0x0" and takes the
+            process down. The type has to be declared here too.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- Grants the share sheet temporary read access to a single clip. -->
         <provider
