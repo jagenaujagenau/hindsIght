@@ -25,6 +25,18 @@ object RecorderBus {
     private val _capture = MutableStateFlow(CaptureState())
     val capture: StateFlow<CaptureState> = _capture.asStateFlow()
 
+    /**
+     * How many collectors are on [capture] right now.
+     *
+     * The recorder uses this to decide whether the waveform is worth capturing at
+     * capture rate. On a watch the answer is "no" for almost the whole day: the
+     * activity is stopped the moment the wrist drops, `collectAsStateWithLifecycle`
+     * unsubscribes, and this falls to zero. Snapshot readers like the tile do not
+     * collect and so do not count — they only need [capture]`.value` to be roughly
+     * current, which it stays.
+     */
+    val captureCollectors: StateFlow<Int> = _capture.subscriptionCount
+
     private val _saves = MutableSharedFlow<SaveOutcome>(extraBufferCapacity = 4)
     val saves: SharedFlow<SaveOutcome> = _saves.asSharedFlow()
 

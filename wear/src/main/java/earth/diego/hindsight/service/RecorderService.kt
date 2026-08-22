@@ -10,9 +10,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.display.DisplayManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.view.Display
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -29,6 +33,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,6 +90,22 @@ class RecorderService : Service() {
     private lateinit var settings: RecorderSettings
     private var wakeLock: PowerManager.WakeLock? = null
 
+    /**
+     * Whether the display is truly on, as opposed to merely not off.
+     *
+     * A subscriber count is not enough to tell whether anyone can see the waveform:
+     * on Wear the activity stays *resumed* through ambient, so a wrist-down leaves
+     * `collectAsStateWithLifecycle` collecting against a screen that is dozing. Only
+     * `STATE_ON` means someone is actually looking.
+     */
+    private val displayOn = MutableStateFlow(true)
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = refreshDisplayState()
+        override fun onDisplayRemoved(displayId: Int) = refreshDisplayState()
+        override fun onDisplayChanged(displayId: Int) = refreshDisplayState()
+    }
+
     @Volatile private var retention: Retention = Retention.DEFAULT
     @Volatile private var saveInFlight = false
     @Volatile private var foregrounded = false
@@ -93,7 +116,22 @@ class RecorderService : Service() {
         recorder = RingRecorder(File(cacheDir, "ring"))
         createNotificationChannel()
 
+        getSystemService(DisplayManager::class.java)
+            .registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+        refreshDisplayState()
+
         scope.launch { recorder.state.collect(RecorderBus::publish) }
+        // Tell the recorder when the waveform is actually being watched, so it can
+        // drop to low-rate, chunked capture the rest of the time. This is the single
+        // biggest lever on all-day drain: the screen is dark for almost all of it,
+        // and per-frame metering into a dozing display buys nobody anything.
+        scope.launch {
+            combine(RecorderBus.captureCollectors, displayOn) { collectors, lit ->
+                collectors > 0 && lit
+            }
+                .distinctUntilChanged()
+                .collect(recorder::setLevelsEnabled)
+        }
         scope.launch {
             retention = settings.retention.first()
             RecorderBus.publishPending(ClipOutbox.pending(this@RecorderService).size)
@@ -192,6 +230,12 @@ class RecorderService : Service() {
 
     // ------------------------------------------------------------------
 
+    private fun refreshDisplayState() {
+        val display = getSystemService(DisplayManager::class.java)
+            ?.getDisplay(Display.DEFAULT_DISPLAY)
+        displayOn.value = display?.state == Display.STATE_ON
+    }
+
     private fun hasMicPermission() = ContextCompat.checkSelfPermission(
         this, Manifest.permission.RECORD_AUDIO,
     ) == PackageManager.PERMISSION_GRANTED
@@ -272,6 +316,9 @@ class RecorderService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching {
+            getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
+        }
         recorder.stop()
         releaseWakeLock()
         scope.cancel()
