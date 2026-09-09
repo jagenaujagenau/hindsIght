@@ -13,18 +13,19 @@ import java.nio.ByteBuffer
  * Assembles the newest [targetFrames] of buffered audio into a single `.m4a`.
  *
  * No re-encoding happens: the AAC frames written by the recorder are copied
- * straight into an MP4 container, so a save costs a few hundred milliseconds of
- * pure IO regardless of clip length.
+ * straight into an MP4 container. Work scales with clip length but never incurs
+ * the CPU cost of re-encoding. The outbox sees only a fully finalised file.
  */
 object ClipBuilder {
 
     /** Comfortably above the largest frame AAC-LC will emit at this bitrate. */
     private const val MAX_FRAME_BYTES = 4096
 
-    fun build(segments: List<Segment>, targetFrames: Int, output: File): File {
-        require(segments.isNotEmpty()) { "Nothing buffered" }
+    fun build(segments: List<Segment>, targetFrames: Int, output: File): File = AtomicClip.write(output) { partial ->
+        require(segments.isNotEmpty() && targetFrames > 0) { "Nothing buffered" }
 
         val available = segments.sumOf { it.frameCount }
+        check(available >= targetFrames) { "Incomplete recording window" }
         // Drop from the front so the clip ends at "now" — the user pressed save
         // because of what just happened, not what happened first.
         var framesToSkip = (available - targetFrames).coerceAtLeast(0)
@@ -39,9 +40,7 @@ object ClipBuilder {
             setByteBuffer("csd-0", Adts.audioSpecificConfig())
         }
 
-        val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val track = muxer.addTrack(format)
-        muxer.start()
+        val muxer = MediaMuxer(partial.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
         val header = ByteArray(Adts.headerSize())
         val payload = ByteArray(MAX_FRAME_BYTES)
@@ -50,8 +49,10 @@ object ClipBuilder {
         var written = 0
 
         try {
+            val track = muxer.addTrack(format)
+            muxer.start()
             for (segment in segments) {
-                if (!segment.file.exists()) continue
+                check(segment.file.exists()) { "A source segment is missing" }
                 BufferedInputStream(segment.file.inputStream(), 32 * 1024).use { input ->
                     while (true) {
                         val size = Adts.readFrame(input, header, payload)
@@ -68,14 +69,12 @@ object ClipBuilder {
                     }
                 }
             }
+            check(written == targetFrames) { "Incomplete clip: $written of $targetFrames frames" }
+            // A failed stop means an invalid MP4: never publish it as a saved clip.
+            muxer.stop()
         } finally {
-            // stop() throws if zero samples were written; release() must still run.
-            runCatching { if (written > 0) muxer.stop() }
             muxer.release()
         }
-
-        check(written > 0) { "No audio frames survived trimming" }
-        return output
     }
 
     fun durationMs(frames: Int): Long = frames * AudioSpec.FRAME_DURATION_US / 1000

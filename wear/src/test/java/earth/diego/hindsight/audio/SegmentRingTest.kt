@@ -31,14 +31,30 @@ class SegmentRingTest {
 
     @Test
     fun `evicts oldest segments beyond the retention window`() {
-        // 2 minutes of retention needs 4 segments, plus one of slack.
+        // Four full segments cover two minutes, including the trim boundary.
         ring.setRetentionFrames(AudioSpec.framesForMinutes(2))
 
         val files = (1..12).map { addFullSegment() }
 
-        assertEquals(5, ring.segmentCount)
-        assertTrue("newest segments survive", files.takeLast(5).all { it.exists() })
+        assertEquals(4, ring.segmentCount)
+        assertTrue("newest segments survive", files.takeLast(4).all { it.exists() })
         assertFalse("oldest segments are deleted", files.first().exists())
+    }
+
+    @Test
+    fun `frequent saves do not shorten the retained window`() {
+        val retention = AudioSpec.framesForMinutes(1)
+        ring.setRetentionFrames(retention)
+        val shortFrames = 78 // Each save closes a segment after about five seconds.
+        repeat(30) {
+            val file = ring.nextSegmentFile(nextIndex++)
+            file.writeBytes(ByteArray(16))
+            ring.add(Segment(file, shortFrames))
+        }
+
+        assertTrue("a full minute must survive frequent saves", ring.bufferedFrames >= retention)
+        assertTrue("keep only the boundary segment as slack", ring.bufferedFrames < retention + shortFrames)
+        assertTrue(ring.pinNewest(retention).sumOf { it.frameCount } >= retention)
     }
 
     @Test
@@ -50,7 +66,7 @@ class SegmentRingTest {
         ring.setRetentionFrames(AudioSpec.framesForMinutes(1))
 
         assertTrue(ring.segmentCount < beforeCount)
-        assertEquals(3, ring.segmentCount)
+        assertEquals(2, ring.segmentCount)
     }
 
     @Test

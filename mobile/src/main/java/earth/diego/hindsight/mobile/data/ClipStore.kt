@@ -43,7 +43,8 @@ data class Clip(
  */
 object ClipStore {
 
-    private val NAME_PATTERN = Regex("""clip_(\d{8}-\d{6})_(\d+)s\.m4a""")
+    // Accept both legacy names and collision-safe watch saves made within one second.
+    private val NAME_PATTERN = Regex("""clip_(\d{8}-\d{6})_(\d+)s(?:_[\da-f-]+)?\.m4a""")
     private val STAMP_FORMAT = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
 
     private val _clips = MutableStateFlow<List<Clip>>(emptyList())
@@ -79,7 +80,7 @@ object ClipStore {
             .sortedByDescending { it.recordedAt }
     }
 
-    private fun toClip(file: File): Clip {
+    internal fun toClip(file: File): Clip {
         val match = NAME_PATTERN.matchEntire(file.name)
         val recordedAt = match?.groupValues?.get(1)
             ?.let { runCatching { STAMP_FORMAT.parse(it)?.time }.getOrNull() }

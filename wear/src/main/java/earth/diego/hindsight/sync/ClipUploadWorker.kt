@@ -9,12 +9,17 @@ import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.Wearable
 import earth.diego.hindsight.shared.WearProtocol
+import earth.diego.hindsight.service.RecorderBus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /**
@@ -32,7 +37,7 @@ import java.io.File
  *
  *  2. **Never delete a clip here.** Transport success is not delivery. The file
  *     stays in the outbox until the phone acknowledges it has written the clip to
- *     disk (see [ClipAckService]). Re-sending a clip the phone already has is
+ *     disk (see [SyncListenerService]). Re-sending a clip the phone already has is
  *     harmless — it re-acknowledges and the watch cleans up then.
  */
 class ClipUploadWorker(
@@ -44,39 +49,45 @@ class ClipUploadWorker(
         const val TAG = "ClipUploadWorker"
 
         /** Generous: a 60-minute clip over Bluetooth Classic is minutes, not seconds. */
-        const val SEND_TIMEOUT_MS = 10 * 60 * 1000L
+        const val SEND_TIMEOUT_MS = 7 * 60 * 1000L
+        const val RUN_TIMEOUT_MS = 8 * 60 * 1000L
+        const val ACK_GRACE_MS = 10_000L
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val pending = ClipOutbox.pending(applicationContext)
-        if (pending.isEmpty()) return@withContext Result.success()
-
-        val nodeId = findReceiverNode() ?: run {
-            Log.i(TAG, "No paired phone with the receiver capability; will retry")
-            return@withContext Result.retry()
-        }
-
-        val channelClient = Wearable.getChannelClient(applicationContext)
-        var failures = 0
-
-        for (file in pending) {
-            if (!file.exists()) continue // acknowledged by the phone mid-run
-            try {
-                sendOne(channelClient, nodeId, file)
-                Log.i(TAG, "Sent ${file.name}; awaiting phone acknowledgement")
-            } catch (t: Throwable) {
-                failures++
-                Log.w(TAG, "Failed to send ${file.name}", t)
+        // Install the fallback before sending: an OS kill/cancellation of an
+        // immediate worker must not strand the outbox until the next user action.
+        val retryWorker = inputData.getBoolean(ClipOutbox.IS_RETRY, false)
+        if (ClipOutbox.pending(applicationContext).isEmpty()) return@withContext Result.success()
+        if (!retryWorker) ClipOutbox.enqueueRetry(applicationContext)
+        val needsRetry = try {
+            withTimeout(RUN_TIMEOUT_MS) {
+                val nodeId = findReceiverNode()
+                if (nodeId == null) {
+                    Log.i(TAG, "No reachable receiver; delayed retry remains scheduled")
+                    true
+                } else {
+                    val channelClient = Wearable.getChannelClient(applicationContext)
+                    ClipOutbox.drain.drain({ ClipOutbox.pending(applicationContext) }) { file ->
+                        try {
+                            sendOne(channelClient, nodeId, file)
+                            // Give the durable ack a chance to arrive before a queued
+                            // wakeup takes the lock and considers resending this file.
+                            withTimeoutOrNull(ACK_GRACE_MS) {
+                                RecorderBus.pendingUploads.first { !file.exists() }
+                            }
+                        } catch (t: CancellationException) {
+                            throw t
+                        } catch (t: Exception) {
+                            Log.w(TAG, "Failed to send ${file.name}", t)
+                        }
+                    }
+                }
             }
+        } catch (t: TimeoutCancellationException) {
+            true // Leave margin before WorkManager's execution deadline.
         }
-
-        // Always retry: even a clean send is unfinished until the ack lands and
-        // removes the file. The next run sees an empty outbox and succeeds.
-        if (failures > 0 || ClipOutbox.pending(applicationContext).isNotEmpty()) {
-            Result.retry()
-        } else {
-            Result.success()
-        }
+        if (retryWorker && needsRetry) Result.retry() else Result.success()
     }
 
     private suspend fun sendOne(channelClient: ChannelClient, nodeId: String, file: File) {
@@ -114,26 +125,34 @@ class ClipUploadWorker(
             }
         }
 
-        channelClient.registerChannelCallback(channel, callback).await()
+        var drainedNormally = false
         try {
-            channelClient.sendFile(channel, Uri.fromFile(file)).await()
-            withTimeout(SEND_TIMEOUT_MS) { drained.await() }
-        } catch (t: TimeoutCancellationException) {
-            runCatching { channelClient.close(channel).await() }
-            throw IllegalStateException("Timed out draining ${file.name}", t)
+            withTimeout(SEND_TIMEOUT_MS) {
+                channelClient.registerChannelCallback(channel, callback).await()
+                channelClient.sendFile(channel, Uri.fromFile(file)).await()
+                drained.await()
+                drainedNormally = true
+            }
         } finally {
-            runCatching { channelClient.unregisterChannelCallback(channel, callback).await() }
+            // Cancellation must release transport resources too. Never close a
+            // successfully sent channel early; the phone owns that final close.
+            withContext(NonCancellable) {
+                withTimeoutOrNull(5_000) {
+                    if (!drainedNormally) runCatching { channelClient.close(channel).await() }
+                    runCatching { channelClient.unregisterChannelCallback(channel, callback).await() }
+                }
+            }
         }
     }
 
-    private suspend fun findReceiverNode(): String? = runCatching {
+    private suspend fun findReceiverNode(): String? = try {
         Wearable.getCapabilityClient(applicationContext)
             .getCapability(WearProtocol.CAPABILITY_CLIP_RECEIVER, CapabilityClient.FILTER_REACHABLE)
-            .await()
-            .nodes
-            // Prefer a directly-connected node over one reachable via the cloud.
-            .sortedByDescending { it.isNearby }
-            .firstOrNull()
-            ?.id
-    }.getOrNull()
+            .await().nodes.sortedByDescending { it.isNearby }.firstOrNull()?.id
+    } catch (t: CancellationException) {
+        throw t
+    } catch (t: Exception) {
+        Log.w(TAG, "Could not discover receiver", t)
+        null
+    }
 }

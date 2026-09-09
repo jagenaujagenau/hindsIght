@@ -1,6 +1,8 @@
 package earth.diego.hindsight.tile
 
 import android.app.Activity
+import android.content.Intent
+import earth.diego.hindsight.MainActivity
 import android.os.Bundle
 import android.util.Log
 import earth.diego.hindsight.service.RecorderService
@@ -37,7 +39,10 @@ class TileActionActivity : Activity() {
 
             ACTION_START -> {
                 Log.i(TAG, "Tile: start")
-                RecorderService.start(this)
+                // A visible activity obtains while-in-use microphone access on
+                // API 34+, and can request permission on a first tile launch.
+                startActivity(Intent(this, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_START_LISTENING, true))
             }
 
             else -> Log.w(TAG, "Tile action with no recognised extra")

@@ -76,8 +76,10 @@ graph LR
 ```
 
 **Nothing is re-encoded when you save.** The AAC frames the encoder already produced are
-copied straight into an MP4 container, so saving 60 minutes costs the same as saving one —
-a few hundred milliseconds of IO. Trimming is exact to a 64 ms frame.
+copied straight into an MP4 container. IO scales with clip length, without the CPU cost of
+re-encoding. Trimming is exact to a 64 ms frame. A clip is built under a `.part` name,
+finalised and flushed to disk before it becomes uploadable; only then does the watch
+confirm with a haptic. Collision-safe names keep rapid saves distinct.
 
 **Transport success is not delivery.** `sendFile` resolves when bytes reach the local
 Bluetooth buffer, which says nothing about the phone. The watch therefore deletes nothing
@@ -97,11 +99,22 @@ retention, so a 1-minute user pays ~0.3 MB rather than the 10.6 MB a 60-minute w
 
 ## The two apps
 
-**Watch** — one screen, no buttons. A live waveform in four styles (bars, oscilloscope
-line, concentric pulse, dots), six colour options, and three sensitivity settings. Capture,
-encode and disk writes share a single thread paced by a blocking `AudioRecord.read`; there
-is no timer and no polling. A tile offers one-tap save from the watch face, and an
-OngoingActivity chip keeps the running recorder visible.
+**Watch** — the main face is a full-screen save target, with listening/buffer status,
+action hints, and feedback that distinguishes saved-on-watch from delivered-to-phone.
+Swipe for Start/Stop and retention controls; Appearance contains four wave styles,
+six colours, and three **display-only** sensitivity settings. Capture, encode and disk
+writes share a thread paced by blocking `AudioRecord.read`. Status updates roughly once
+per second; waveform metering runs only while its page has an interactive collector.
+Audio targets are interpolated at display-frame cadence with fast attack and soft release;
+the line uses rounded curves, and pulse rings respond in radius and brightness. Drawing
+settles completely in silence, pauses off-screen, and respects system animation duration scale.
+A tile offers one-tap save and its latest outcome, and an OngoingActivity chip keeps the
+running recorder visible. Tile Start opens the app to obtain microphone access safely.
+
+Start/Stop intent is persisted by the service for every entry point. Capture failures
+release the wake lock and recording notification, with an explicit tap-to-retry state
+rather than an automatic restart loop. Reconnect/manual sync wakes an immediate drain
+independently of the single delayed retry; transfers are serialized.
 
 **Phone** — the archive, laid out as a time axis rather than a list. Each clip is drawn as
 its own waveform, so you recognise a recording by its shape; stretches where nothing was
@@ -153,17 +166,26 @@ required — the Data Layer pairs apps by applicationId and signing key, not by 
 ./gradlew :wear:testDebugUnitTest :mobile:testDebugUnitTest
 ```
 
-21 unit tests, aimed at the places where a bug corrupts data silently rather than crashing:
+52 unit tests, covering audio retention, save publication, lifecycle serialization,
+sync queue draining, status presentation, and phone metadata:
 
 | Suite | Covers |
 |---|---|
 | `AdtsTest` | ADTS header round-trip; 16 kHz mono AAC-LC framing |
-| `SegmentRingTest` | Ring eviction, retention shrink, pinned segments surviving a save |
+| `SegmentRingTest` | Duration-based eviction, frequent short saves, retention shrink, pinned segments |
+| `RingRecorderLifecycleTest` | Nonblocking shutdown and no overlapping restart, using controlled threads |
+| `AtomicClipTest` | Final-file visibility, failed/empty builds, overwrite protection |
+| `UploadDrainTest` | Newly saved clips during transfer, serialization, missing acks, cancellation |
+| `RecorderBusTest` / `RecorderPresentationTest` | Replayable outcomes, matching acks, truthful feedback |
+| `WaveformMotionTest` | Interpolation, refresh-rate independence, interruption, settling, animation scale, safe inputs |
+| `ClipStoreTest` | Legacy and collision-safe filenames retain phone metadata |
 | `TranscriptStitcherTest` | Splicing overlapping transcript chunks without stutter |
 | `TimelineTest` | Hour marks, quiet stretches, never spanning a day boundary |
 
-Capture, encoding, the Data Layer transfer and the UI need real hardware and are not
-covered by unit tests.
+Microphone/codec behavior, service foreground/wake-lock integration, WorkManager timing,
+Data Layer transfer, and UI rendering still need real hardware. The lifecycle test replaces
+only the capture thread body; it does not simulate a microphone. See
+[validation and profiling](docs/validation.md) for the device checklist.
 
 ## Known gaps
 
@@ -175,7 +197,8 @@ covered by unit tests.
 - **The Gradle wrapper is on 9.0** while AGP is 8.7.3, which is outside AGP's documented
   support matrix. It currently builds clean, but it is untested ground.
 - **Release builds are unsigned** and lint is disabled for them: AGP 8.7.3's bundled lint
-  throws `IncompatibleClassChangeError` against the newer androidx artifacts.
+  throws `IncompatibleClassChangeError` against the newer androidx artifacts. `:wear:lintDebug`
+  also encounters this toolchain failure; it is not a passing validation gate.
 - No CI, and no signing configuration for distribution.
 
 ## License

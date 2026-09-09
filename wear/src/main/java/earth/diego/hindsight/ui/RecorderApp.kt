@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,20 +31,25 @@ import earth.diego.hindsight.data.RecorderSettings
 import earth.diego.hindsight.data.Appearance
 import earth.diego.hindsight.service.RecorderBus
 import earth.diego.hindsight.service.RecorderService
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 private const val PAGE_WAVE = 0
 private const val PAGE_SETTINGS = 1
 
 @Composable
-fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>) {
+fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>, startRequested: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var granted by remember { mutableStateOf(initiallyGranted) }
+    var pendingStartRequest by rememberSaveable { mutableStateOf(startRequested) }
     val settings = remember { RecorderSettings(context) }
     val appearance by settings.appearance.collectAsStateWithLifecycle(Appearance())
-    val capture by RecorderBus.capture.collectAsStateWithLifecycle()
+    // The app shell needs transitions, not the once-per-second buffer counter.
+    val recordingFlow = remember { RecorderBus.capture.map { it.recording }.distinctUntilChanged() }
+    val recording by recordingFlow.collectAsStateWithLifecycle(false)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -55,12 +61,15 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>) {
         if (!granted) permissionLauncher.launch(requiredPermissions)
     }
 
-    // Opening the app *is* the start gesture — there is no idle screen to press
-    // through. Driven off persisted intent rather than a composition flag, so a
-    // service that died is picked back up instead of leaving a dead flat line.
-    val listening by settings.listening.collectAsStateWithLifecycle(true)
-    LaunchedEffect(granted, listening, capture.recording) {
-        if (granted && listening && !capture.recording) RecorderService.start(context)
+    // The service reads persisted intent before starting. No optimistic `true`
+    // default, and no effect keyed to capture failure that could restart in a loop.
+    LaunchedEffect(granted) {
+        if (granted) {
+            if (pendingStartRequest) {
+                pendingStartRequest = false
+                RecorderService.start(context)
+            } else if (RecorderBus.capture.value.error == null) RecorderService.restore(context)
+        }
     }
 
     HindsightTheme {
@@ -70,27 +79,35 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>) {
                 return@AppScaffold
             }
 
-            // Settings is a page, not a destination: swipe left to reach it,
-            // swipe back to return. No buttons anywhere.
+            // Swipe left for recording controls, then Appearance for visual choices.
             val pagerState = rememberPagerState { 2 }
 
             HorizontalPagerScaffold(pagerState = pagerState) {
                 HorizontalPager(state = pagerState) { page ->
                     when (page) {
-                        PAGE_WAVE -> WaveScreen(
-                            state = capture,
-                            style = appearance.waveStyle,
-                            accent = appearance.accent.color ?: MaterialTheme.colorScheme.primary,
-                            sensitivity = appearance.sensitivity,
-                            onSave = { RecorderService.save(context) },
-                            onStop = {
-                                scope.launch { settings.setListening(false) }
-                                RecorderService.stop(context)
-                            },
-                            onResume = { scope.launch { settings.setListening(true) } },
-                        )
+                        PAGE_WAVE -> {
+                            val capture by RecorderBus.capture.collectAsStateWithLifecycle()
+                            val save by RecorderBus.save.collectAsStateWithLifecycle()
+                            val pending by RecorderBus.pendingUploads.collectAsStateWithLifecycle()
+                            WaveScreen(
+                                state = capture,
+                                save = save,
+                                pendingUploads = pending,
+                                visible = pagerState.currentPage == PAGE_WAVE,
+                                style = appearance.waveStyle,
+                                accent = appearance.accent.color ?: MaterialTheme.colorScheme.primary,
+                                sensitivity = appearance.sensitivity,
+                                onSave = { RecorderService.save(context) },
+                                onStop = { RecorderService.stop(context) },
+                                onResume = { RecorderService.start(context) },
+                            )
+                        }
 
                         PAGE_SETTINGS -> SettingsScreen(
+                            recording = recording,
+                            onToggleRecording = {
+                                if (recording) RecorderService.stop(context) else RecorderService.start(context)
+                            },
                             retention = appearance.retention,
                             waveStyle = appearance.waveStyle,
                             accent = appearance.accent,
@@ -99,14 +116,7 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>) {
                             onAccent = { scope.launch { settings.setAccent(it) } },
                             sensitivity = appearance.sensitivity,
                             onSensitivity = { scope.launch { settings.setSensitivity(it) } },
-                            onRetention = { choice ->
-                                if (capture.recording) {
-                                    // Live change: the service resizes the ring and persists it.
-                                    RecorderService.setRetention(context, choice)
-                                } else {
-                                    scope.launch { settings.setRetention(choice) }
-                                }
-                            },
+                            onRetention = { RecorderService.setRetention(context, it) },
                         )
                     }
                 }

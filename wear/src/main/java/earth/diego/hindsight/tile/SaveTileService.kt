@@ -13,6 +13,9 @@ import androidx.wear.tiles.TileService
 import androidx.concurrent.futures.ResolvableFuture
 import com.google.common.util.concurrent.ListenableFuture
 import earth.diego.hindsight.service.RecorderBus
+import earth.diego.hindsight.service.SaveState
+import earth.diego.hindsight.ui.saveMessage
+import earth.diego.hindsight.ui.formatBufferDuration
 
 /**
  * A tile whose entire job is one tap.
@@ -47,16 +50,23 @@ class SaveTileService : TileService() {
         val state = RecorderBus.capture.value
         val pending = RecorderBus.pendingUploads.value
 
-        val headline = if (state.recording) formatDuration(state.bufferedMs) else "Not listening"
-        val caption = when {
-            state.recording -> "buffered"
-            pending > 0 -> "$pending waiting for phone"
-            else -> "Tap to start"
+        val save = RecorderBus.save.value
+        val headline = when {
+            state.error != null -> "Interrupted"
+            state.starting -> "Starting…"
+            state.recording -> formatBufferDuration(state.bufferedMs)
+            else -> "Not listening"
         }
+        val caption = if (state.error != null) "Open app to retry" else
+            saveMessage(save, pending) ?: if (state.recording) "buffered · tap to save" else "Tap to start"
 
         val layout = LayoutElementBuilders.Box.Builder()
             .setWidth(expand())
             .setHeight(expand())
+            .setModifiers(ModifiersBuilders.Modifiers.Builder()
+                .setPadding(ModifiersBuilders.Padding.Builder()
+                    .setAll(androidx.wear.protolayout.DimensionBuilders.dp(24f)).build())
+                .build())
             .addContent(
                 LayoutElementBuilders.Column.Builder()
                     .addContent(text(headline, 30f, primary = true))
@@ -64,7 +74,7 @@ class SaveTileService : TileService() {
                     .addContent(spacer())
                     .addContent(
                         if (state.recording) {
-                            actionChip("SAVE", ID_SAVE)
+                            actionChip(if (save == SaveState.Saving) "SAVING…" else "SAVE", ID_SAVE)
                         } else {
                             actionChip("START", ID_TOGGLE)
                         },
@@ -100,10 +110,7 @@ class SaveTileService : TileService() {
     private fun <T> immediate(value: T): ListenableFuture<T> =
         ResolvableFuture.create<T>().apply { set(value) }
 
-    /**
-     * Taps arrive here rather than launching an activity, so saving never puts a
-     * screen between the user and the recording.
-     */
+    /** Refresh the snapshot on entry; tap actions are handled by TileActionActivity. */
     override fun onTileEnterEvent(requestParams: androidx.wear.tiles.EventBuilders.TileEnterEvent) {
         getUpdater(this).requestUpdate(SaveTileService::class.java)
     }
@@ -111,6 +118,8 @@ class SaveTileService : TileService() {
     private fun text(value: String, sizeSp: Float, primary: Boolean) =
         LayoutElementBuilders.Text.Builder()
             .setText(value)
+            .setMaxLines(if (primary) 1 else 3)
+            .setMultilineAlignment(LayoutElementBuilders.TEXT_ALIGN_CENTER)
             .setFontStyle(
                 LayoutElementBuilders.FontStyle.Builder()
                     .setSize(androidx.wear.protolayout.DimensionBuilders.sp(sizeSp))
@@ -125,6 +134,7 @@ class SaveTileService : TileService() {
 
     private fun actionChip(label: String, id: String) =
         LayoutElementBuilders.Box.Builder()
+            .setHeight(androidx.wear.protolayout.DimensionBuilders.dp(52f))
             .setModifiers(
                 ModifiersBuilders.Modifiers.Builder()
                     .setBackground(
@@ -178,8 +188,4 @@ class SaveTileService : TileService() {
             )
             .build()
 
-    private fun formatDuration(millis: Long): String {
-        val totalSeconds = millis / 1000
-        return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
-    }
 }

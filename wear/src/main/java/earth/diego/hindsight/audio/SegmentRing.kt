@@ -1,6 +1,5 @@
 package earth.diego.hindsight.audio
 
-import earth.diego.hindsight.shared.AudioSpec
 import java.io.File
 
 /** One closed ring-buffer segment on disk. */
@@ -26,8 +25,8 @@ class SegmentRing(private val directory: File) {
     private val pinned = mutableSetOf<File>()
     private val pendingDelete = mutableListOf<File>()
 
-    /** Number of segments kept, including one segment of slack for the trim margin. */
-    private var capacity = 1
+    /** Duration, not file count: saving can close a segment at any point. */
+    private var retentionFrames = 1
 
     val segmentCount: Int get() = segments.size
 
@@ -43,23 +42,24 @@ class SegmentRing(private val directory: File) {
     }
 
     fun setRetentionFrames(retentionFrames: Int) {
-        // +1 segment so a save can always reach back a *full* retention window even
-        // when the oldest segment is only partially inside it.
-        capacity = (retentionFrames + AudioSpec.FRAMES_PER_SEGMENT - 1) /
-            AudioSpec.FRAMES_PER_SEGMENT + 1
+        require(retentionFrames > 0)
+        this.retentionFrames = retentionFrames
         evict()
     }
 
     fun nextSegmentFile(index: Long): File = File(directory, "seg_%08d.aac".format(index))
 
     fun add(segment: Segment) {
+        require(segment.frameCount > 0)
         segments.addLast(segment)
         bufferedFrames += segment.frameCount
         evict()
     }
 
     private fun evict() {
-        while (segments.size > capacity) {
+        // Keep the oldest segment only while some of it is needed to cover the
+        // requested window. Short segments must not evict a full minute of audio.
+        while (segments.isNotEmpty() && bufferedFrames - segments.first().frameCount >= retentionFrames) {
             val oldest = segments.removeFirst()
             bufferedFrames -= oldest.frameCount
             delete(oldest.file)

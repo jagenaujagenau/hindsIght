@@ -75,9 +75,9 @@ enum class Accent(val label: String, val color: Color?) {
  * across the wave, so a wider window makes quiet sounds draw taller.
  */
 enum class Sensitivity(val label: String, val rangeDb: Float, val description: String) {
-    LOW("Low", 45f, "Only speech nearby"),
-    MEDIUM("Medium", 60f, "Normal conversation"),
-    HIGH("High", 75f, "Picks up the room");
+    LOW("Low", 45f, "Smaller wave"),
+    MEDIUM("Medium", 60f, "Balanced wave"),
+    HIGH("High", 75f, "Larger wave for quiet sounds");
 
     companion object {
         val DEFAULT = MEDIUM

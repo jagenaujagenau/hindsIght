@@ -12,12 +12,15 @@ import earth.diego.hindsight.ui.RecorderApp
 
 class MainActivity : ComponentActivity() {
 
+    companion object { const val EXTRA_START_LISTENING = "start_listening" }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(savedInstanceState)
 
         setContent {
             RecorderApp(
+                startRequested = intent.getBooleanExtra(EXTRA_START_LISTENING, false),
                 initiallyGranted = ContextCompat.checkSelfPermission(
                     this, Manifest.permission.RECORD_AUDIO,
                 ) == PackageManager.PERMISSION_GRANTED,

@@ -6,6 +6,8 @@ import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import earth.diego.hindsight.service.RecorderBus
+import earth.diego.hindsight.tile.SaveTileService
+import androidx.wear.tiles.TileService
 import earth.diego.hindsight.shared.WearProtocol
 import java.io.File
 
@@ -37,7 +39,9 @@ class SyncListenerService : WearableListenerService() {
             // Duplicate ack after a resend, or already gone. Either is fine.
             Log.i(TAG, "Ack for $fileName with nothing to delete")
         }
+        RecorderBus.acknowledge(fileName)
         RecorderBus.publishPending(ClipOutbox.pending(this).size)
+        TileService.getUpdater(this).requestUpdate(SaveTileService::class.java)
     }
 
     private fun onSyncRequested(messageEvent: MessageEvent) {
@@ -45,6 +49,7 @@ class SyncListenerService : WearableListenerService() {
         Log.i(TAG, "Phone asked to sync; $pending clip(s) pending")
         if (pending > 0) ClipOutbox.enqueueUpload(this)
         RecorderBus.publishPending(pending)
+        TileService.getUpdater(this).requestUpdate(SaveTileService::class.java)
 
         // Tell the phone what it is waiting for, so it can say something true
         // instead of spinning.

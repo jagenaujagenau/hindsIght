@@ -13,6 +13,8 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -20,18 +22,27 @@ import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import earth.diego.hindsight.MainActivity
 import earth.diego.hindsight.R
+import earth.diego.hindsight.audio.AtomicClip
+import earth.diego.hindsight.audio.CaptureState
 import earth.diego.hindsight.audio.ClipBuilder
 import earth.diego.hindsight.audio.RingRecorder
 import earth.diego.hindsight.data.Retention
 import earth.diego.hindsight.data.RecorderSettings
 import earth.diego.hindsight.sync.ClipOutbox
+import earth.diego.hindsight.tile.SaveTileService
+import androidx.wear.tiles.TileService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -49,18 +60,29 @@ class RecorderService : Service() {
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1
 
+        // Also spans service recreation: a new instance cannot delete the old
+        // ring or open a second microphone while asynchronous teardown finishes.
+        private val recorderLifecycle = Mutex()
+
         const val ACTION_START = "earth.diego.hindsight.START"
+        const val ACTION_RESTORE = "earth.diego.hindsight.RESTORE"
         const val ACTION_STOP = "earth.diego.hindsight.STOP"
         const val ACTION_SAVE = "earth.diego.hindsight.SAVE"
         const val ACTION_SET_RETENTION = "earth.diego.hindsight.SET_RETENTION"
         const val EXTRA_MINUTES = "minutes"
 
-        /** Only START may launch the service — everything else addresses a live one. */
-        fun start(context: Context) {
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, RecorderService::class.java).setAction(ACTION_START),
-            )
+        fun start(context: Context) = launch(context, ACTION_START)
+        fun restore(context: Context) = launch(context, ACTION_RESTORE)
+
+        private fun launch(context: Context, action: String) {
+            try {
+                ContextCompat.startForegroundService(
+                    context, Intent(context, RecorderService::class.java).setAction(action),
+                )
+            } catch (t: Exception) {
+                Log.e(TAG, "Could not start recording service", t)
+                RecorderBus.publish(CaptureState(error = "Could not start. Open the app and check microphone access."))
+            }
         }
 
         fun stop(context: Context) = send(context, ACTION_STOP)
@@ -71,115 +93,207 @@ class RecorderService : Service() {
 
         private fun send(context: Context, action: String, configure: (Intent) -> Unit = {}) {
             val intent = Intent(context, RecorderService::class.java).setAction(action).also(configure)
-            // Deliberately startService, not startForegroundService: these actions never
-            // create the service, so promising a startForeground() we would not make
-            // would crash us on API 26+.
-            runCatching { context.startService(intent) }
+            try {
+                context.startService(intent)
+            } catch (t: Exception) {
+                Log.e(TAG, "Could not deliver $action", t)
+                if (action == ACTION_SAVE) RecorderBus.publish(SaveState.Failed("Open the app and try saving again."))
+            }
         }
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val lifecycle = recorderLifecycle
     private lateinit var recorder: RingRecorder
     private lateinit var settings: RecorderSettings
     private var wakeLock: PowerManager.WakeLock? = null
-
-    @Volatile private var retention: Retention = Retention.DEFAULT
-    @Volatile private var saveInFlight = false
-    @Volatile private var foregrounded = false
+    private var saveJob: Job? = null
+    private var destroyed = false
+    private var initializationFailed = false
+    private var latestStartId = 0
+    private var retention: Retention = Retention.DEFAULT
 
     override fun onCreate() {
         super.onCreate()
         settings = RecorderSettings(this)
-        recorder = RingRecorder(File(cacheDir, "ring"))
         createNotificationChannel()
-
-        scope.launch { recorder.state.collect(RecorderBus::publish) }
         scope.launch {
-            retention = settings.retention.first()
-            RecorderBus.publishPending(ClipOutbox.pending(this@RecorderService).size)
+            lifecycle.withLock {
+                try {
+                    // Stale-ring cleanup performs filesystem IO, never on the main thread.
+                    recorder = withContext(Dispatchers.IO) {
+                        AtomicClip.discardIncomplete(ClipOutbox.directory(this@RecorderService))
+                        RingRecorder(File(cacheDir, "ring"))
+                    }
+                    retention = settings.retention.first()
+                    if (publishPending() > 0) ClipOutbox.enqueueUpload(this@RecorderService)
+                } catch (t: CancellationException) {
+                    throw t
+                } catch (t: Exception) {
+                    initializationFailed = true
+                    Log.e(TAG, "Recorder initialization failed", t)
+                    RecorderBus.publish(CaptureState(error = "Could not open recording storage. Free space and retry."))
+                    releaseWakeLock()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@withLock
+                }
+                scope.launch { RecorderBus.meterSubscribers.collect { recorder.setMeteringEnabled(it > 0) } }
+                scope.launch { recorder.levels.collect(RecorderBus::publishLevel) }
+                scope.launch {
+                    var lastMode: Pair<Boolean, Boolean>? = null
+                    recorder.state.collect { state ->
+                        val mode = state.recording to state.starting
+                        // Do not erase a terminal error merely by creating a service for a save/stop.
+                        if (state.recording || state.starting || state.error != null) RecorderBus.publish(state)
+                        if (mode != lastMode) {
+                            lastMode = mode
+                            updateTile()
+                        }
+                        if (state.error != null) lifecycle.withLock {
+                            if (!destroyed && recorder.state.value.error == state.error) {
+                                saveJob?.join()
+                                releaseWakeLock()
+                                stopForeground(STOP_FOREGROUND_REMOVE)
+                                updateTile()
+                                stopSelf(latestStartId)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: ACTION_START
-        if (action != ACTION_START && !foregrounded) {
-            // Raced with a stop, or delivered to a service we never promoted.
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        when (action) {
-            ACTION_START -> beginRecording()
-            ACTION_STOP -> { stopRecording(); return START_NOT_STICKY }
-            ACTION_SAVE -> saveClip()
-            ACTION_SET_RETENTION -> {
-                val minutes = intent?.getIntExtra(EXTRA_MINUTES, retention.minutes) ?: retention.minutes
-                retention = Retention.fromMinutes(minutes)
-                recorder.setRetention(retention.minutes)
-                scope.launch { settings.setRetention(retention) }
-                if (recorder.state.value.recording) updateNotification()
+        val action = intent?.action ?: ACTION_RESTORE
+        latestStartId = startId
+        // Meet the foreground deadline before any settings read or queued shutdown.
+        if (action == ACTION_START || action == ACTION_RESTORE) {
+            try {
+                check(hasMicPermission()) { "Microphone permission not granted" }
+                goForeground()
+            } catch (t: Exception) {
+                Log.e(TAG, "Could not promote microphone service", t)
+                RecorderBus.publish(CaptureState(error = "Open the app and allow microphone access, then retry."))
+                releaseWakeLock()
+                stopSelf(startId)
+                return START_NOT_STICKY
             }
-            else -> beginRecording()
         }
-        // Restarting a dead capture beats silently having stopped listening.
-        return START_STICKY
+        scope.launch {
+            lifecycle.withLock {
+                if (destroyed || initializationFailed) return@withLock
+                try {
+                    when (action) {
+                        ACTION_START -> {
+                            settings.setListening(true)
+                            beginRecording()
+                        }
+                        ACTION_RESTORE -> {
+                            if (settings.listening.first() && RecorderBus.capture.value.error == null) beginRecording()
+                            else stopRecording(startId)
+                        }
+                        ACTION_STOP -> {
+                            settings.setListening(false)
+                            stopRecording(startId)
+                        }
+                        ACTION_SAVE -> {
+                            if (recorder.state.value.recording) saveClip()
+                            else {
+                                RecorderBus.publish(SaveState.NothingBuffered)
+                                updateTile()
+                                if (!recorder.state.value.starting) stopSelf(startId)
+                            }
+                        }
+                        ACTION_SET_RETENTION -> {
+                            val minutes = intent?.getIntExtra(EXTRA_MINUTES, retention.minutes) ?: retention.minutes
+                            retention = Retention.fromMinutes(minutes)
+                            settings.setRetention(retention)
+                            recorder.setRetention(retention.minutes)
+                            if (recorder.state.value.recording) updateNotification() else stopSelf(startId)
+                        }
+                    }
+                } catch (t: CancellationException) {
+                    throw t
+                } catch (t: Exception) {
+                    Log.e(TAG, "Recorder command failed", t)
+                    stopRecording(startId)
+                    RecorderBus.publish(CaptureState(error = "Could not record. Check microphone access and free storage, then retry."))
+                    updateTile()
+                }
+            }
+        }
+        return if (action == ACTION_STOP) START_NOT_STICKY else START_STICKY
     }
 
-    private fun beginRecording() {
-        if (!hasMicPermission()) {
-            Log.w(TAG, "RECORD_AUDIO not granted; refusing to start")
-            stopSelf()
-            return
-        }
-        // Promote synchronously — the 5-second startForeground deadline is not
-        // something to spend on a DataStore read.
+    private suspend fun beginRecording() {
+        check(hasMicPermission()) { "Microphone permission not granted" }
+        retention = settings.retention.first()
         goForeground()
         acquireWakeLock()
-        scope.launch {
-            // On the first start after process death, onCreate's load may still be
-            // in flight; reading it here keeps us off the default 5-minute window.
-            retention = settings.retention.first()
-            recorder.start(retention.minutes)
-            updateNotification()
-        }
+        recorder.start(retention.minutes)
+        updateNotification()
+        updateTile()
     }
 
-    private fun stopRecording() {
-        foregrounded = false
-        recorder.stop()
+    private suspend fun stopRecording(startId: Int) {
+        // Finish a locally requested save before releasing its pinned source files.
+        saveJob?.join()
+        if (::recorder.isInitialized) recorder.stop()
+        RecorderBus.publish(CaptureState())
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        updateTile()
+        stopSelf(startId)
     }
 
     private fun saveClip() {
-        if (saveInFlight) return
-        saveInFlight = true
-        scope.launch {
+        if (saveJob?.isActive == true) return
+        RecorderBus.publish(SaveState.Saving)
+        updateTile()
+        saveJob = scope.launch {
             try {
                 val window = recorder.pinNewest(retention.minutes)
                 if (window == null) {
-                    RecorderBus.publish(SaveOutcome.NothingBuffered)
+                    RecorderBus.publish(SaveState.NothingBuffered)
                     return@launch
                 }
                 try {
-                    val output = File(ClipOutbox.directory(this@RecorderService), newClipName(window.frames))
-                    withContext(Dispatchers.IO) {
+                    val saved = withContext(Dispatchers.IO) {
+                        val output = File(ClipOutbox.directory(this@RecorderService), newClipName(window.frames))
                         ClipBuilder.build(window.segments, window.frames, output)
+                        SaveState.Saved(output.name, ClipBuilder.durationMs(window.frames), output.length())
                     }
-                    ClipOutbox.enqueueUpload(this@RecorderService)
-                    RecorderBus.publishPending(ClipOutbox.pending(this@RecorderService).size)
-                    RecorderBus.publish(
-                        SaveOutcome.Saved(ClipBuilder.durationMs(window.frames), output.length()),
-                    )
+                    // Publish local success before enqueueing: an unusually fast ack
+                    // must not be overwritten with "waiting for phone" afterwards.
+                    RecorderBus.publish(saved)
+                    // Confirmation belongs to persistence, not the tap; also works from the tile.
+                    runCatching {
+                        getSystemService(Vibrator::class.java)?.vibrate(
+                            VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK),
+                        )
+                    }
+                    // Sync scheduling is separate from local persistence: a scheduler
+                    // failure must not turn safely saved audio into a "save failed" UI.
+                    try {
+                        publishPending()
+                        ClipOutbox.enqueueUpload(this@RecorderService)
+                    } catch (t: CancellationException) {
+                        throw t
+                    } catch (t: Exception) {
+                        Log.e(TAG, "Clip saved; sync will be retried on next open/reconnect", t)
+                    }
                 } finally {
-                    recorder.release(window)
+                    withContext(NonCancellable) { recorder.release(window) }
                 }
-            } catch (t: Throwable) {
+            } catch (t: CancellationException) {
+                throw t
+            } catch (t: Exception) {
                 Log.e(TAG, "Save failed", t)
-                RecorderBus.publish(SaveOutcome.Failed(t.message ?: "Save failed"))
+                RecorderBus.publish(SaveState.Failed("Could not save. Free storage, then tap to try again."))
             } finally {
-                saveInFlight = false
+                updateTile()
             }
         }
     }
@@ -187,7 +301,7 @@ class RecorderService : Service() {
     private fun newClipName(frames: Int): String {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val seconds = ClipBuilder.durationMs(frames) / 1000
-        return "clip_${stamp}_${seconds}s.m4a"
+        return "clip_${stamp}_${seconds}s_${java.util.UUID.randomUUID()}.m4a"
     }
 
     // ------------------------------------------------------------------
@@ -203,7 +317,6 @@ class RecorderService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        foregrounded = true
     }
 
     private fun updateNotification() {
@@ -271,10 +384,31 @@ class RecorderService : Service() {
         wakeLock = null
     }
 
+    private suspend fun publishPending(): Int {
+        val count = withContext(Dispatchers.IO) { ClipOutbox.pending(this@RecorderService).size }
+        RecorderBus.publishPending(count)
+        return count
+    }
+
+    private fun updateTile() {
+        runCatching { TileService.getUpdater(this).requestUpdate(SaveTileService::class.java) }
+            .onFailure { Log.w(TAG, "Tile update unavailable", it) }
+    }
+
     override fun onDestroy() {
-        recorder.stop()
-        releaseWakeLock()
-        scope.cancel()
+        destroyed = true
+        // Service callbacks cannot suspend. Cleanup joins on IO while this scope
+        // stays alive long enough to finish any save and release the microphone.
+        scope.launch {
+            lifecycle.withLock {
+                saveJob?.join()
+                if (::recorder.isInitialized) recorder.stop()
+                if (RecorderBus.capture.value.error == null) RecorderBus.publish(CaptureState())
+                releaseWakeLock()
+                updateTile()
+            }
+            scope.cancel()
+        }
         super.onDestroy()
     }
 
