@@ -1,0 +1,259 @@
+---
+import { SOURCE } from '../lib/product';
+import Icon from '../components/ui/Icon';
+import '@fontsource-variable/manrope';
+import '@fontsource/ibm-plex-mono/latin-400.css';
+import '../styles/global.css';
+
+/**
+ * The privacy policy of record — the URL given to Google Play.
+ *
+ * Every factual claim here is checked against the native source, not the
+ * marketing copy in sections/Privacy.astro. If the app's data behaviour
+ * changes, this page changes in the same commit: Play compares the policy
+ * against observed runtime behaviour, and a stale policy is a rejection.
+ */
+const UPDATED = '10 September 2026';
+const CONTACT = 'hello@nerdev.org';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#050505" />
+    <meta name="description" content="The Hindsight privacy policy: what the app records, where it is kept, how long it lives, and what never leaves your devices." />
+    <meta name="robots" content="index, follow" />
+    {Astro.site && <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />}
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Privacy Policy — Hindsight</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <nav class="site-nav" aria-label="Main navigation"><a href="/" class="wordmark">HINDSIGHT<span class="nav-dot"></span></a><div><a href="/#how-it-works">How it works</a><a href={SOURCE}>GitHub <Icon name="arrow-up-right" /></a></div></nav>
+
+    <main id="main" class="legal">
+      <header class="legal-head">
+        <span class="eyebrow">Privacy Policy</span>
+        <h1>What Hindsight<br /><em>does with sound.</em></h1>
+        <p class="legal-lede">
+          Hindsight listens continuously and keeps only the last few minutes. That is a serious
+          thing to run on a device you wear, so this page describes exactly what is captured,
+          where it is held, how long it survives, and who else can reach it. It is written to be
+          read, not to be survived.
+        </p>
+        <p class="mono legal-updated">Last updated {UPDATED} · Applies to the Hindsight watch and phone apps (<span>earth.diego.hindsight</span>)</p>
+      </header>
+
+      <section class="legal-summary" aria-labelledby="summary">
+        <h2 id="summary">The short version</h2>
+        <ul>
+          <li>Hindsight has <strong>no server, no account and no login</strong>. Neither app requests the Android <span class="mono">INTERNET</span> permission, so neither one can send your audio, transcripts or usage anywhere.</li>
+          <li>The watch holds only a rolling window of the <strong>last 1 to 60 minutes</strong>, whichever you choose. Older audio is continuously overwritten and is not recoverable.</li>
+          <li>A clip you save travels <strong>directly to your paired phone</strong> over the local Wear OS connection, and is erased from the watch as soon as the phone confirms it has been written.</li>
+          <li>Transcription runs <strong>on the phone itself</strong>, using Android's on-device speech recognition. No audio is uploaded for transcription.</li>
+          <li>There is <strong>no analytics, telemetry, advertising or crash-reporting</strong> code in either app.</li>
+          <li>Audio leaves your devices only if <strong>you deliberately share a clip</strong> using Android's share sheet.</li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="what">
+        <h2 id="what">What the app records, and when</h2>
+        <p>
+          The watch app records audio from the watch microphone <strong>only while a listening
+          session is running</strong>. A session starts when you start it and stops when you stop
+          it, when a session time limit you set expires, or when Android stops the app. Nothing is
+          recorded before you start a session, and nothing is recorded after you stop one.
+        </p>
+        <p>
+          While a session runs, the watch shows a persistent notification and an ongoing activity
+          indicator, so the watch face itself tells you it is listening. This is not something the
+          app can do silently.
+        </p>
+        <p>
+          Audio is written into a fixed-size ring buffer on the watch's own storage. The buffer holds
+          the retention window you selected — 1, 5, 15, 30 or 60 minutes, defaulting to 1 minute.
+          Once the buffer is full, the oldest audio is overwritten by the newest. Audio that falls
+          outside the window is gone; the app keeps no second copy and no index of it.
+        </p>
+      </section>
+
+      <section aria-labelledby="saved">
+        <h2 id="saved">What happens when you save a clip</h2>
+        <p>
+          Tapping save writes the current retention window to a clip and queues it for your paired
+          phone. The transfer runs over the Wear OS Data Layer, which is the local channel between a
+          watch and its paired phone provided by Google Play services. The clip is not routed through
+          a Hindsight server, because there is no Hindsight server.
+        </p>
+        <p>
+          The clip stays on the watch until the phone acknowledges that it has written the file to
+          disk, at which point the watch deletes it. This is the only circumstance in which a saved
+          clip is removed from the watch automatically. If your phone is out of range, the clip waits
+          in a queue on the watch until it can be delivered.
+        </p>
+        <p>
+          On the phone, clips and their transcripts are stored in the app's private internal
+          storage. That area is not readable by other apps on the device, and is not written to
+          shared or external storage where a gallery or file manager would pick it up.
+        </p>
+      </section>
+
+      <section aria-labelledby="transcripts">
+        <h2 id="transcripts">Transcription</h2>
+        <p>
+          The phone app can turn a saved clip into searchable text. It does this with Android's
+          on-device speech recogniser, which on supported devices is backed by system components such
+          as Android System Intelligence. The audio is handed to that system service on the same
+          phone. The app holds no API key, contacts no speech service, and cannot upload audio for
+          transcription.
+        </p>
+        <p>
+          On-device recognition requires Android 13 or newer and is not available on every device. If
+          it is unavailable, the clip simply stays untranscribed — nothing is sent elsewhere as a
+          fallback. Transcripts are stored alongside the clip in the app's private storage, and are
+          deleted with it.
+        </p>
+      </section>
+
+      <section aria-labelledby="sharing">
+        <h2 id="sharing">Sharing — the one way audio leaves</h2>
+        <p>
+          The phone app lets you share a clip through Android's standard share sheet. This is
+          always something you start, for a clip you pick, choosing the destination yourself.
+        </p>
+        <p>
+          Once you share a clip with another app — a messaging app, a mail client, a cloud drive —
+          that copy is governed by that app's privacy policy, not this one. Hindsight has no way to
+          reach it, recall it, or delete it afterwards.
+        </p>
+      </section>
+
+      <section aria-labelledby="retention">
+        <h2 id="retention">How long things are kept, and how to erase them</h2>
+        <ul class="legal-list">
+          <li><strong>Unsaved audio on the watch:</strong> until it falls outside your retention window, which is at most 60 minutes. Then it is overwritten.</li>
+          <li><strong>A saved clip on the watch:</strong> until the phone confirms delivery, then it is deleted.</li>
+          <li><strong>Clips and transcripts on the phone:</strong> until you delete them. Hindsight applies no automatic expiry to saved clips — they are yours to keep or remove.</li>
+          <li><strong>Deleting a clip:</strong> moves it to an in-app trash so the action can be undone, and permanently deletes it from the phone's storage once that undo window closes.</li>
+          <li><strong>Uninstalling:</strong> removes the app's private storage, which erases every clip, transcript and setting on that device. Uninstall the watch app to clear the watch buffer.</li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="permissions">
+        <h2 id="permissions">Permissions, and why each one exists</h2>
+        <dl class="legal-perms">
+          <div><dt class="mono">RECORD_AUDIO</dt><dd>Watch only. Captures the rolling buffer. This is the app's entire function; without it there is nothing to save.</dd></div>
+          <div><dt class="mono">FOREGROUND_SERVICE_MICROPHONE</dt><dd>Watch only. Lets recording continue with the screen off, which is the point of a wearable buffer. Android requires a visible notification for the whole time it runs.</dd></div>
+          <div><dt class="mono">POST_NOTIFICATIONS</dt><dd>Both apps. Shows the listening notification and save confirmations.</dd></div>
+          <div><dt class="mono">FOREGROUND_SERVICE_DATA_SYNC</dt><dd>Phone only. Receives an incoming clip from the watch reliably enough to acknowledge it.</dd></div>
+          <div><dt class="mono">WAKE_LOCK</dt><dd>Watch only. Keeps the recorder running rather than being suspended mid-buffer.</dd></div>
+          <div><dt class="mono">VIBRATE</dt><dd>Watch only. Confirms a save by touch, so you need not look at the watch.</dd></div>
+        </dl>
+        <p>
+          Neither app requests <span class="mono">INTERNET</span> or network-state permissions. Neither
+          requests location, contacts, camera, or access to your photos or files.
+        </p>
+      </section>
+
+      <section aria-labelledby="others">
+        <h2 id="others">Other people in the room</h2>
+        <p>
+          Hindsight records whatever the watch can hear, which will often include people who are not
+          you. In many places, recording a conversation without the consent of the people in it is
+          unlawful, and the rules differ sharply between countries and between states.
+        </p>
+        <p>
+          You are responsible for how you use the app. Tell the people you are with that you are
+          listening, and get their agreement. The app is designed to make this easier rather than
+          harder: it shows a persistent notification while it listens, and it keeps minutes rather
+          than days.
+        </p>
+      </section>
+
+      <section aria-labelledby="third">
+        <h2 id="third">Third parties</h2>
+        <p>
+          Hindsight has no advertising, analytics, attribution or crash-reporting SDKs, and shares no
+          data with any company for those purposes. Two Google components are involved in running the
+          app on your own hardware:
+        </p>
+        <ul class="legal-list">
+          <li><strong>Google Play services (Wear OS Data Layer):</strong> carries a saved clip from your watch to your paired phone over the local connection between them.</li>
+          <li><strong>Android's on-device speech recognition:</strong> converts a saved clip to text on the phone.</li>
+        </ul>
+        <p>
+          These are parts of the Android platform on your devices, and their handling of data is
+          governed by Google's own privacy policy for those platform services.
+        </p>
+      </section>
+
+      <section aria-labelledby="children">
+        <h2 id="children">Children</h2>
+        <p>
+          Hindsight is not directed at children, and is not designed or marketed for use by anyone
+          under 13. The app collects no data centrally, so there is no children's data for us to hold
+          or to delete.
+        </p>
+      </section>
+
+      <section aria-labelledby="changes">
+        <h2 id="changes">Changes to this policy</h2>
+        <p>
+          If the app's handling of data changes, this page is updated in the same release, and the
+          date at the top changes with it. The app is open source, so the behaviour described here
+          can be checked against the code rather than taken on trust.
+        </p>
+      </section>
+
+      <section aria-labelledby="contact">
+        <h2 id="contact">Contact</h2>
+        <p>
+          Questions about this policy, or about what the app does with a recording, can be sent to
+          <a href={`mailto:${CONTACT}`}>{CONTACT}</a>. The source is public at
+          <a href={SOURCE}>github.com <Icon name="arrow-up-right" /></a>.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer"><a href="/" class="wordmark">HINDSIGHT</a><span class="mono">KEEP A MOMENT. NOT EVERYTHING.</span><a href={SOURCE}>Source <Icon name="arrow-up-right" /></a></footer>
+
+    <style>
+      .legal{max-width:760px;margin:0 auto;padding:170px var(--gutter) 60px}
+      .legal-head{padding-bottom:60px;border-bottom:1px solid var(--rule)}
+      .legal-head .eyebrow{margin-bottom:34px}
+      .legal h1{font-size:clamp(42px,6.4vw,86px)}
+      .legal-lede{margin-top:44px;font-size:16px;color:var(--muted)}
+      .legal-updated{display:block;margin-top:40px;color:#777b72;line-height:1.9}
+      .legal-updated span{color:var(--muted)}
+      .legal section{padding-top:72px}
+      .legal h2{font-size:clamp(23px,2.6vw,31px);letter-spacing:-.035em}
+      .legal p{margin-top:22px;font-size:15px;color:var(--muted)}
+      .legal strong{color:var(--bone);font-weight:500}
+      .legal a{color:var(--bone);border-bottom:1px solid #4a4b47;padding-bottom:2px}
+      .legal a:hover{border-color:var(--bone)}
+      .legal a svg{display:inline-block;vertical-align:middle}
+      .legal ul{margin:26px 0 0;padding:0;list-style:none}
+      .legal li{position:relative;margin-top:16px;padding-left:26px;font-size:15px;line-height:1.7;color:var(--muted)}
+      .legal li::before{content:'';position:absolute;left:2px;top:11px;width:6px;height:1px;background:#5c5d58}
+      .legal-summary{padding-top:64px}
+      .legal-summary ul{border-left:1px solid var(--rule);padding-left:28px}
+      .legal-summary li{padding-left:0}
+      .legal-summary li::before{display:none}
+      .legal-perms{margin:34px 0 0;display:grid;gap:0}
+      .legal-perms>div{display:grid;grid-template-columns:250px 1fr;gap:24px;padding:22px 0;border-top:1px solid var(--rule)}
+      .legal-perms dt{font-size:9px;letter-spacing:.06em;color:var(--bone);padding-top:4px;overflow-wrap:anywhere}
+      .legal-perms dd{margin:0;font-size:14px;line-height:1.7;color:var(--muted)}
+      .legal .mono{font-size:10px}
+      @media(max-width:600px){
+        .legal{padding-top:120px}
+        .legal h1{font-size:40px}
+        .legal-lede{font-size:14px}
+        .legal p,.legal li{font-size:14px}
+        .legal section{padding-top:56px}
+        .legal-summary ul{padding-left:20px}
+        .legal-perms>div{grid-template-columns:1fr;gap:10px}
+      }
+    </style>
+  </body>
+</html>
