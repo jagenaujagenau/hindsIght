@@ -7,7 +7,8 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const narrow = matchMedia('(max-width: 600px)');
 const root = document.documentElement;
 const motionButton = document.querySelector<HTMLButtonElement>('#motion-control');
-let manualOff = false;
+// If startup timed out, don't swap the now-visible static story out from under the reader.
+let manualOff = root.dataset.motion === 'fallback';
 let context: gsap.Context | undefined;
 let stopWaves = () => {};
 
@@ -71,7 +72,10 @@ function build() {
   if (playIcon) playIcon.hidden = !off;
   if (pauseIcon) pauseIcon.hidden = off;
   document.dispatchEvent(new CustomEvent('hindsight:motion', { detail: { off } }));
-  if (off) return;
+  if (off) {
+    root.classList.remove('motion-pending');
+    return;
+  }
   root.classList.add('cinematic');
   const mobile = narrow.matches;
   context = gsap.context(() => {
@@ -131,8 +135,8 @@ function build() {
   });
   stopWaves = liveWaves();
   ScrollTrigger.refresh();
-  // A brief opening fade, never an indefinite blank screen at scroll position zero.
-  if (window.scrollY < 10) context.add(() => gsap.fromTo('.opening-copy>p:first-child', { opacity: 0 }, { opacity: 1, duration: 1, delay: .15 }));
+  // The opening copy is already visible; fading it from zero here causes a second flash.
+  root.classList.remove('motion-pending');
 }
 
 motionButton?.addEventListener('click', () => {

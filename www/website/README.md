@@ -20,6 +20,7 @@ npx astro dev stop
 ```sh
 npm test
 npm run check
+npm run test:browser # Requires Chrome; invokes agent-browser via npx
 npm run build
 npx astro preview --background --port 4322
 npx astro preview stop
@@ -57,6 +58,7 @@ See **[docs/product-source.md](docs/product-source.md)** for native-file mapping
 ## Verification
 
 - Nine model/source-drift tests; Astro / TypeScript check; static production build.
+- `npm run test:browser`: frame-by-frame first-load regression with a delayed animation bundle, desktop/mobile layouts, scroll reveal, motion toggle, no-JS markup, startup timeout, and reduced motion.
 - Browser checks: desktop and 412px portrait; search filtering; rename; playback progress/speed; confirmed deletion + undo; retention changes, pause and save snapshots; scroll reversal; reduced-motion unpinning; no horizontal overflow at 412px.
 - Axe: no violations in inspected archive/buffer and reduced-motion states. Automated checks do not replace a full screen-reader/device audit.
 - Local production Lighthouse (mobile throttling): **98 Performance / 100 Accessibility / 100 Best Practices / 100 SEO**, **CLS 0**. Scores vary by machine and deployment; remeasure on the public host.

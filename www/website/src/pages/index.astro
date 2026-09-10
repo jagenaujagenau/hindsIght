@@ -31,6 +31,20 @@ import '../styles/global.css';
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Hindsight — Remember what just happened.</title>
+    <script is:inline>
+      // Choose the opening composition before first paint, not after GSAP downloads.
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const root = document.documentElement;
+        root.classList.add('cinematic', 'motion-pending');
+        // Keep the static story accessible if the animation bundle fails to load.
+        setTimeout(() => {
+          if (root.classList.contains('motion-pending')) {
+            root.classList.remove('cinematic', 'motion-pending');
+            root.dataset.motion = 'fallback';
+          }
+        }, 4000);
+      }
+    </script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
