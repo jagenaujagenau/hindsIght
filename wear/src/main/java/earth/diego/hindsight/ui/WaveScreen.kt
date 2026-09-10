@@ -2,12 +2,15 @@ package earth.diego.hindsight.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +41,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.MaterialTheme
@@ -48,9 +52,12 @@ import earth.diego.hindsight.data.Sensitivity
 import earth.diego.hindsight.data.WaveStyle
 import earth.diego.hindsight.service.RecorderBus
 import earth.diego.hindsight.service.SaveState
+import earth.diego.hindsight.sync.SyncState
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
@@ -72,6 +79,10 @@ fun WaveScreen(
     onSave: () -> Unit,
     onStop: () -> Unit,
     onResume: () -> Unit,
+    showHints: Boolean = true,
+    sync: SyncState = SyncState.Idle,
+    warning: String? = null,
+    sessionNotice: String? = null,
 ) {
     val status = when {
         state.error != null -> "Recording interrupted"
@@ -86,7 +97,19 @@ fun WaveScreen(
         state.error != null -> "Tap to retry"
         else -> "Tap to start"
     }
-    val feedback = state.error ?: saveMessage(save, pendingUploads)
+    val confirmationFlow = remember(save, visible) {
+        flow {
+            val remaining = if (save is SaveState.Saved && visible) confirmationRemainingMs(save, System.currentTimeMillis()) else 0L
+            emit(remaining > 0)
+            if (remaining > 0) { delay(remaining); emit(false) }
+        }
+    }
+    val recentConfirmation by confirmationFlow.collectAsStateWithLifecycle(false, minActiveState = Lifecycle.State.RESUMED)
+    val displayedSave = if (save is SaveState.Saved && !recentConfirmation) SaveState.Idle else save
+    val feedback = state.error ?: sessionNotice ?: saveMessage(displayedSave, 0) ?: warning
+    val pendingMessage = syncMessage(sync, pendingUploads)
+    val enlargedText = LocalDensity.current.fontScale > 1.1f
+    val scrollState = rememberScrollState()
 
     ScreenScaffold {
         Box(
@@ -111,7 +134,8 @@ fun WaveScreen(
             // Reserve the round display's top/bottom chords for clock and pager.
             // The graphic yields space to text on small watches / larger fonts.
             Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 28.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 28.dp)
+                    .then(if (enlargedText) Modifier.verticalScroll(scrollState) else Modifier),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(status, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
@@ -122,23 +146,34 @@ fun WaveScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                state.sessionRemainingMs?.let { remaining ->
+                    Text("Timer · ${formatBufferDuration(remaining)}", style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"))
+                }
                 WaveGraphic(
                     recording = state.recording,
                     visible = visible,
                     style = style,
                     accent = accent,
                     sensitivity = sensitivity,
-                    modifier = Modifier.weight(1f).fillMaxWidth().heightIn(max = 96.dp),
+                    modifier = if (enlargedText) Modifier.fillMaxWidth().height(48.dp)
+                        else Modifier.weight(1f).fillMaxWidth().heightIn(max = 96.dp),
                 )
-                Text(action, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
-                Text(
-                    feedback ?: if (state.recording) "Hold to stop · swipe for settings" else "Swipe for settings",
+                if (showHints || !state.recording || save == SaveState.Saving) {
+                    Text(action, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+                }
+                val footer = feedback ?: if (showHints && state.recording) "Hold to stop · swipe for settings"
+                    else if (showHints) "Swipe for settings" else null
+                if (footer != null) Text(
+                    footer,
                     modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (state.error != null || save is SaveState.Failed)
+                    color = if (state.error != null || save is SaveState.Failed || warning != null)
                         MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
+                if (pendingMessage != null) Text(pendingMessage,
+                    style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

@@ -64,6 +64,38 @@ class UploadDrainTest {
         }
     }
 
+    @Test fun `offline preparation retains files and completes as retryable`() = runBlocking {
+        temp.newFile("clip.m4a")
+        var completion: Boolean? = null
+        var sent = false
+        assertTrue(UploadDrain().drain(::pending, prepare = { false }, completed = { completion = it }) { sent = true })
+        assertEquals(true, completion)
+        assertFalse(sent)
+        assertEquals(1, pending().size)
+    }
+
+    @Test fun `discovery and completion are ordered inside the transfer lock`() = runBlocking {
+        val events = mutableListOf<String>()
+        temp.newFile("clip.m4a")
+        val drain = UploadDrain()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val first = async(start = CoroutineStart.UNDISPATCHED) {
+            drain.drain(::pending, prepare = { events += "first-discovery"; true }, completed = { events += "first-complete" }) {
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        val second = async(start = CoroutineStart.UNDISPATCHED) {
+            drain.drain(::pending, prepare = { events += "second-discovery"; true }, completed = { events += "second-complete" }) { it.delete() }
+        }
+        assertEquals(listOf("first-discovery"), events)
+        release.complete(Unit)
+        first.await(); second.await()
+        assertEquals(listOf("first-discovery", "first-complete", "second-discovery", "second-complete"), events)
+    }
+
     @Test fun `cancellation keeps the file and releases the transfer lock`() = runBlocking {
         withTimeout(3_000) {
             val file = temp.newFile("clip.m4a")

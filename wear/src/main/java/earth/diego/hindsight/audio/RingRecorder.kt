@@ -3,6 +3,8 @@ package earth.diego.hindsight.audio
 import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioManager
+import android.media.AudioRecordingConfiguration
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -26,6 +28,8 @@ import java.io.File
 import java.io.OutputStream
 import java.io.IOException
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
 /** What the UI needs to draw, and nothing more. */
@@ -35,6 +39,7 @@ data class CaptureState(
     val retentionMs: Long = 0,
     val starting: Boolean = false,
     val error: String? = null,
+    val sessionRemainingMs: Long? = null,
 )
 
 /**
@@ -178,6 +183,14 @@ class RingRecorder internal constructor(
         var audioRecord: AudioRecord? = null
         var codec: MediaCodec? = null
         var failure: String? = null
+        val silenced = AtomicBoolean(false)
+        val recordingCallback = object : AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
+                // AudioRecord filters this callback to this client. A policy-muted
+                // microphone must not look like healthy recording of a quiet room.
+                if (configs.any { it.isClientSilenced }) silenced.set(true)
+            }
+        }
         try {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val minBuffer = AudioRecord.getMinBufferSize(
@@ -195,6 +208,7 @@ class RingRecorder internal constructor(
                 maxOf(minBuffer, PCM_READ_BYTES) * 4,
             )
             check(audioRecord.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord init failed" }
+            audioRecord.registerAudioRecordingCallback(Executor { it.run() }, recordingCallback)
 
             codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
             codec.apply {
@@ -224,6 +238,7 @@ class RingRecorder internal constructor(
             var samplesFed = 0L
 
             while (running) {
+                check(!silenced.get()) { "Microphone was silenced by the system" }
                 drainCommands()
 
                 val inIndex = codec.dequeueInputBuffer(20_000)
@@ -254,6 +269,7 @@ class RingRecorder internal constructor(
                 running = false
                 while (true) (commands.poll() ?: break).cancel()
             }
+            runCatching { audioRecord?.unregisterAudioRecordingCallback(recordingCallback) }
             runCatching { audioRecord?.stop() }
             runCatching { audioRecord?.release() }
             runCatching { codec?.stop() }

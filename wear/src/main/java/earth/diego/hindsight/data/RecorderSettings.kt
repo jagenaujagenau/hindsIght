@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -99,6 +100,12 @@ class RecorderSettings(private val context: Context) {
     private val waveKey = stringPreferencesKey("wave_style")
     private val accentKey = stringPreferencesKey("accent")
     private val sensitivityKey = stringPreferencesKey("sensitivity")
+    private val sessionLimitKey = intPreferencesKey("session_limit_minutes")
+    private val endWallKey = longPreferencesKey("session_end_wall")
+    private val endElapsedKey = longPreferencesKey("session_end_elapsed")
+    private val bootCountKey = intPreferencesKey("session_boot")
+    private val durationKey = longPreferencesKey("session_duration")
+    private val successfulSavesKey = intPreferencesKey("successful_saves")
 
     /**
      * Whether the user wants to be listening — persisted, because it is intent,
@@ -125,8 +132,50 @@ class RecorderSettings(private val context: Context) {
     val appearance: Flow<Appearance> =
         combine(retention, waveStyle, accent, sensitivity) { r, w, a, s -> Appearance(r, w, a, s) }
 
+    val sessionLimit: Flow<SessionLimit> = context.dataStore.data.map {
+        SessionLimit.fromMinutes(it[sessionLimitKey] ?: 0)
+    }
+
+    val sessionDeadline: Flow<SessionDeadline?> = context.dataStore.data.map { prefs ->
+        val wall = prefs[endWallKey]
+        val elapsed = prefs[endElapsedKey]
+        val duration = prefs[durationKey]
+        if (wall == null || elapsed == null || duration == null || duration <= 0) null
+        else SessionDeadline(wall, elapsed, prefs[bootCountKey] ?: -1, duration)
+    }
+
+    val showHints: Flow<Boolean> = context.dataStore.data.map { (it[successfulSavesKey] ?: 0) < 3 }
+
+    suspend fun noteSuccessfulSave() {
+        context.dataStore.edit { it[successfulSavesKey] = ((it[successfulSavesKey] ?: 0) + 1).coerceAtMost(3) }
+    }
+
+    suspend fun resetHints() { context.dataStore.edit { it[successfulSavesKey] = 0 } }
+
+    suspend fun setSessionLimit(limit: SessionLimit) {
+        context.dataStore.edit { it[sessionLimitKey] = limit.minutes }
+    }
+
+    suspend fun setSessionDeadline(deadline: SessionDeadline?) {
+        context.dataStore.edit {
+            if (deadline == null) {
+                it.remove(endWallKey); it.remove(endElapsedKey); it.remove(bootCountKey); it.remove(durationKey)
+            } else {
+                it[endWallKey] = deadline.wallTimeMs
+                it[endElapsedKey] = deadline.elapsedTimeMs
+                it[bootCountKey] = deadline.bootCount
+                it[durationKey] = deadline.durationMs
+            }
+        }
+    }
+
     suspend fun setListening(listening: Boolean) {
-        context.dataStore.edit { it[listeningKey] = listening }
+        context.dataStore.edit {
+            it[listeningKey] = listening
+            if (!listening) {
+                it.remove(endWallKey); it.remove(endElapsedKey); it.remove(bootCountKey); it.remove(durationKey)
+            }
+        }
     }
 
     suspend fun setRetention(retention: Retention) {

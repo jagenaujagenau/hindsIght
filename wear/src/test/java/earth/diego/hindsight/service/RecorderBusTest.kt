@@ -1,5 +1,6 @@
 package earth.diego.hindsight.service
 
+import earth.diego.hindsight.sync.SyncState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -7,7 +8,7 @@ import org.junit.Before
 import org.junit.Test
 
 class RecorderBusTest {
-    @Before fun reset() { RecorderBus.publish(SaveState.Idle) }
+    @Before fun reset() { RecorderBus.publish(SaveState.Idle); RecorderBus.publishSync(SyncState.Idle) }
 
     private fun saved() = SaveState.Saved("clip.m4a", 58_000, 1000)
 
@@ -29,6 +30,22 @@ class RecorderBusTest {
         assertEquals(saved().copy(delivered = true), RecorderBus.save.value)
         RecorderBus.acknowledge("clip.m4a")
         assertEquals(saved().copy(delivered = true), RecorderBus.save.value)
+    }
+
+    @Test fun `queue requests and old acknowledgements cannot mask a current transfer`() {
+        val sending = SyncState.Sending("new.m4a")
+        RecorderBus.publishSync(sending)
+        RecorderBus.queueSync()
+        RecorderBus.acknowledgeSync("old.m4a", 1)
+        assertEquals(sending, RecorderBus.sync.value)
+        RecorderBus.acknowledgeSync("new.m4a", 0)
+        assertEquals(SyncState.Idle, RecorderBus.sync.value)
+    }
+
+    @Test fun `ack for one clip leaves the remaining queue visible`() {
+        RecorderBus.publishSync(SyncState.AwaitingAck("clip.m4a"))
+        RecorderBus.acknowledgeSync("clip.m4a", 2)
+        assertEquals(SyncState.Queued, RecorderBus.sync.value)
     }
 
     @Test fun `an older ack cannot overwrite an in-flight save or its failure`() {

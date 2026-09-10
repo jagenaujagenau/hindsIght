@@ -57,7 +57,7 @@ On the watch: grant the microphone permission. Recording starts as soon as the a
 | Gesture | Action |
 |---|---|
 | Tap | Save the last window |
-| Long-press | Stop listening |
+| Long-press | Open stop options: save first, discard unsaved audio, or keep listening |
 | Tap while stopped | Resume |
 | Swipe | Settings |
 
@@ -114,7 +114,23 @@ running recorder visible. Tile Start opens the app to obtain microphone access s
 Start/Stop intent is persisted by the service for every entry point. Capture failures
 release the wake lock and recording notification, with an explicit tap-to-retry state
 rather than an automatic restart loop. Reconnect/manual sync wakes an immediate drain
-independently of the single delayed retry; transfers are serialized.
+independently of the single delayed retry; transfers are serialized. Sync & storage shows
+queued, finding-phone, unavailable, sending, and awaiting-confirmation states, with manual retry.
+
+**Save & stop** preserves the current buffer before stopping; a failed save leaves listening
+on and reports the error. **Timer** offers 15/30/60-minute sessions (off by default), saving
+only the selected retention window—not the whole session—before stopping. Deadlines survive
+service/activity recreation and use monotonic time within a boot. A timer save failure leaves
+listening on with a persistent warning rather than discarding unsaved audio.
+
+Storage warnings appear below 50 MiB free or when pending clips reach 100 MiB. New recording
+and save operations reserve 20 MiB beyond their estimated additional storage. No saved clip
+is silently evicted. Low battery (15% or less, unplugged) is informational, never an automatic
+stop. The permission screen offers app settings after permanent denial and rechecks on return.
+
+Gesture hints retire after three successful saves and can be restored in settings. Local-save
+confirmations expire after five seconds; pending uploads and safety warnings remain visible.
+Larger system text makes the main face scrollable so safety messages remain reachable.
 
 **Phone** — the archive, laid out as a time axis rather than a list. Each clip is drawn as
 its own waveform, so you recognise a recording by its shape; stretches where nothing was
@@ -166,7 +182,7 @@ required — the Data Layer pairs apps by applicationId and signing key, not by 
 ./gradlew :wear:testDebugUnitTest :mobile:testDebugUnitTest
 ```
 
-52 unit tests, covering audio retention, save publication, lifecycle serialization,
+72 unit tests, covering audio retention, save publication, lifecycle serialization,
 sync queue draining, status presentation, and phone metadata:
 
 | Suite | Covers |
@@ -178,14 +194,19 @@ sync queue draining, status presentation, and phone metadata:
 | `UploadDrainTest` | Newly saved clips during transfer, serialization, missing acks, cancellation |
 | `RecorderBusTest` / `RecorderPresentationTest` | Replayable outcomes, matching acks, truthful feedback |
 | `WaveformMotionTest` | Interpolation, refresh-rate independence, interruption, settling, animation scale, safe inputs |
+| `SessionDeadlineTest` | Timer restore, clock changes, reboot fallback, expiry |
+| `SaveBeforeStopTest` | Save completion precedes destructive stop; failure/cancellation preserve capture |
+| `StorageStatusTest` / `PermissionRecoveryTest` | Storage reserve, warning thresholds, battery, permission recovery |
 | `ClipStoreTest` | Legacy and collision-safe filenames retain phone metadata |
 | `TranscriptStitcherTest` | Splicing overlapping transcript chunks without stutter |
 | `TimelineTest` | Hour marks, quiet stretches, never spanning a day boundary |
 
-Microphone/codec behavior, service foreground/wake-lock integration, WorkManager timing,
-Data Layer transfer, and UI rendering still need real hardware. The lifecycle test replaces
-only the capture thread body; it does not simulate a microphone. See
-[validation and profiling](docs/validation.md) for the device checklist.
+There are also **13 native instrumentation tests** for Compose UI, enlarged text, real
+recording, screen-off capture, save-and-stop, microphone interruption, timers, preferences,
+and paired-phone reconnects. Their APK compiles, but they have **not been run on a device**.
+Hardware and paired-phone tests require explicit opt-in on a disposable debug install.
+See [device test commands](docs/device-tests.md) and [validation/profiling](docs/validation.md).
+The JVM lifecycle test replaces only the capture thread body; it does not simulate a microphone.
 
 ## Known gaps
 

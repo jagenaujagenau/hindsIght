@@ -28,12 +28,31 @@ import earth.diego.hindsight.data.Accent
 import earth.diego.hindsight.data.Retention
 import earth.diego.hindsight.data.Sensitivity
 import earth.diego.hindsight.data.WaveStyle
+import earth.diego.hindsight.data.SessionLimit
+import earth.diego.hindsight.service.StorageStatus
+import earth.diego.hindsight.service.SaveState
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import earth.diego.hindsight.sync.SyncState
+
+private enum class SettingsPage { MAIN, APPEARANCE, TIMER, SYNC }
 
 /** Recording controls first; decorative choices live one level deeper. */
 @Composable
 fun SettingsScreen(
     recording: Boolean,
     onToggleRecording: () -> Unit,
+    onSaveStop: () -> Unit,
+    save: SaveState,
+    sessionNotice: String?,
+    sessionLimit: SessionLimit,
+    onTimer: (SessionLimit) -> Unit,
+    storage: StorageStatus?,
+    sync: SyncState,
+    pendingUploads: Int,
+    onSync: () -> Unit,
+    onHints: () -> Unit,
     retention: Retention,
     waveStyle: WaveStyle,
     accent: Accent,
@@ -44,23 +63,47 @@ fun SettingsScreen(
     onAccent: (Accent) -> Unit,
     onSensitivity: (Sensitivity) -> Unit,
 ) {
-    var appearanceOpen by rememberSaveable { mutableStateOf(false) }
-    BackHandler(appearanceOpen) { appearanceOpen = false }
-    if (appearanceOpen) {
-        AppearanceSettings(waveStyle, accent, sensitivity, resolvedAccent, onWaveStyle, onAccent, onSensitivity) {
-            appearanceOpen = false
+    var page by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
+    BackHandler(page != SettingsPage.MAIN) { page = SettingsPage.MAIN }
+    when (page) {
+        SettingsPage.APPEARANCE -> {
+            AppearanceSettings(waveStyle, accent, sensitivity, resolvedAccent, onWaveStyle, onAccent, onSensitivity) { page = SettingsPage.MAIN }
+            return
         }
-        return
+        SettingsPage.TIMER -> {
+            TimerSettings(sessionLimit, onTimer, sessionNotice) { page = SettingsPage.MAIN }
+            return
+        }
+        SettingsPage.SYNC -> {
+            SyncSettings(storage, sync, pendingUploads, onSync) { page = SettingsPage.MAIN }
+            return
+        }
+        SettingsPage.MAIN -> Unit
     }
 
     val listState = rememberTransformingLazyColumnState()
     ScreenScaffold(scrollState = listState) { contentPadding ->
         TransformingLazyColumn(state = listState, contentPadding = contentPadding) {
             item { ListHeader { Text("Recording") } }
+            val actionFeedback = sessionNotice ?: if (save !is SaveState.Saved) saveMessage(save, 0) else null
+            if (actionFeedback != null) item {
+                Text(actionFeedback, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            }
             item {
                 Button(onClick = onToggleRecording, modifier = Modifier.fillMaxWidth()) {
                     Text(if (recording) "Stop listening" else "Start listening")
                 }
+            }
+            if (recording) item {
+                Button(onClick = onSaveStop, modifier = Modifier.fillMaxWidth()) { Text("Save & stop") }
+            }
+            item {
+                Button(onClick = { page = SettingsPage.SYNC }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (pendingUploads > 0) "Sync · $pendingUploads pending" else "Sync & storage")
+                }
+            }
+            item {
+                Button(onClick = { page = SettingsPage.TIMER }, modifier = Modifier.fillMaxWidth()) { Text("Timer · ${sessionLimit.label}") }
             }
             item { ListHeader { Text("Save last") } }
             items(Retention.entries, key = { it.name }) { option ->
@@ -73,10 +116,11 @@ fun SettingsScreen(
                 )
             }
             item {
-                Button(onClick = { appearanceOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { page = SettingsPage.APPEARANCE }, modifier = Modifier.fillMaxWidth()) {
                     Text("Appearance")
                 }
             }
+            item { Button(onClick = onHints, modifier = Modifier.fillMaxWidth()) { Text("Show gesture hints") } }
         }
     }
 }

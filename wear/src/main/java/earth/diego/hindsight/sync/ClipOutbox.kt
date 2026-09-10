@@ -6,6 +6,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import earth.diego.hindsight.service.RecorderBus
+import earth.diego.hindsight.service.StorageStatus
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -28,7 +30,15 @@ object ClipOutbox {
             ?.sortedBy { it.name }
             .orEmpty()
 
+    /** Filesystem work; call from IO or a WearableListener callback. */
+    fun refreshStatus(context: Context): StorageStatus {
+        val files = pending(context)
+        return StorageStatus(directory(context).usableSpace, files.sumOf { it.length() }, files.size)
+            .also(RecorderBus::publishStorage)
+    }
+
     fun enqueueUpload(context: Context) {
+        RecorderBus.queueSync()
         // Wakeups never return Result.retry(), so reconnects cannot sit behind
         // hours of backoff. Append preserves a wakeup arriving as a drain exits;
         // each drain also picks up new clips, leaving queued wakeups as cheap no-ops.

@@ -40,12 +40,13 @@ class SyncListenerService : WearableListenerService() {
             Log.i(TAG, "Ack for $fileName with nothing to delete")
         }
         RecorderBus.acknowledge(fileName)
-        RecorderBus.publishPending(ClipOutbox.pending(this).size)
+        val status = ClipOutbox.refreshStatus(this)
+        RecorderBus.acknowledgeSync(fileName, status.pendingCount)
         TileService.getUpdater(this).requestUpdate(SaveTileService::class.java)
     }
 
     private fun onSyncRequested(messageEvent: MessageEvent) {
-        val pending = ClipOutbox.pending(this).size
+        val pending = ClipOutbox.refreshStatus(this).pendingCount
         Log.i(TAG, "Phone asked to sync; $pending clip(s) pending")
         if (pending > 0) ClipOutbox.enqueueUpload(this)
         RecorderBus.publishPending(pending)
@@ -73,7 +74,10 @@ class SyncListenerService : WearableListenerService() {
     override fun onCapabilityChanged(capabilityInfo: CapabilityInfo) {
         if (capabilityInfo.name != WearProtocol.CAPABILITY_CLIP_RECEIVER) return
         val reachable = capabilityInfo.nodes.any { it.isNearby }
-        val pending = ClipOutbox.pending(this).size
+        val pending = ClipOutbox.refreshStatus(this).pendingCount
+        if (pending > 0 && capabilityInfo.nodes.isEmpty() && RecorderBus.sync.value !is SyncState.Sending) {
+            RecorderBus.publishSync(SyncState.PhoneUnavailable)
+        }
         Log.i(TAG, "Receiver capability changed: reachable=$reachable pending=$pending")
         if (reachable && pending > 0) ClipOutbox.enqueueUpload(this)
     }

@@ -38,6 +38,34 @@ check quiet-to-speech response, rapid Stop/Start, leaving/re-entering the page, 
 animator duration scale at 0×, 1× and 2×. Drawing and lifecycle integration still need device
 validation; the unit tests cover the pure motion model, not the Compose frame clock.
 
+## Everyday reliability follow-up
+
+The preceding reliability/waveform work was committed as `5281d9a`. These follow-ups add:
+
+| Before | After |
+| --- | --- |
+| Long-press stopped immediately and discarded the buffer. | Long-press opens explicit save/discard/cancel choices. Settings and the notification offer Save & stop. Failed or cancelled saves cannot reach the destructive stop operation. |
+| Undelivered audio had no storage visibility or reserve. | Sync & storage shows queued bytes/free space. Warn below 50 MiB free or at 100 MiB pending; preflight new recordings/saves against a 20 MiB reserve plus estimated additional bytes. Never evict saved clips to satisfy a quota. |
+| Permission denial could lead to repeated requests with stale grant state. | An explicit permission screen offers Open settings; permanent denial avoids another request. ON_RESUME rechecks microphone permission after returning. |
+| Pending count alone did not explain delivery delays. | Distinct queued/discovery/unavailable/sending/awaiting-ack/retry states and manual retry. Discovery and final status share the transfer lock; old acknowledgements cannot overwrite a newer transfer's state. |
+| Recording could run indefinitely with no session control. | Optional 15/30/60-minute Save buffer & stop timer (default off), with persisted wall/monotonic deadlines and boot identity. Restores do not extend the session. The countdown remains live even after the audio ring fills. |
+| No low-battery guidance. | A sticky battery broadcast drives an unplugged ≤15% warning in the UI/notification. It never silently stops capture. |
+| Hints and saved messages stayed indefinitely. | Hints retire after three successful saves, with a Show gesture hints action. Five-second confirmations leave the pending indicator intact. A tile timeline expires its confirmation locally without a short wakeup timer. |
+| Long safety text could crowd a small display at larger font scales. | The main face becomes scrollable above 1.1× text scale, with a smaller waveform; explicit safety messages remain reachable. |
+| A policy-silenced microphone could resemble healthy recording of silence. | AudioRecord's recording-configuration callback detects system silencing and enters the existing terminal-error/resource-cleanup path. |
+| No native regression suite. | Thirteen opt-in/native tests cover UI, larger text, actual capture, screen-off behavior, resource release, timer recreation, DataStore preferences, and paired-phone reconnect. See [device test commands and safety requirements](device-tests.md). |
+
+Timer semantics are deliberate: expiry saves **only the current retention window**, not the
+whole session. If a timer save fails, capture continues with a persistent warning; it does
+not retry indefinitely or silently discard audio. The expired persisted deadline prevents a
+later process restore from extending the failed session. There is no guarantee of executing
+an expiry save if Android kills the process first; already-saved clips remain protected.
+
+The new device tests have compiled but have **not run on hardware**. Native UI rendering,
+permission-settings return, rotary/TalkBack behavior, OS kills/reboots, storage exhaustion,
+long backoff and battery cost remain physical-validation items. A passing JVM policy test
+or APK build does not establish those behaviors on a watch.
+
 ## Automated checks
 
 Requires JDK 17+ and Android SDK 35. A Homebrew JDK may need an explicit `JAVA_HOME`:
@@ -46,7 +74,7 @@ Requires JDK 17+ and Android SDK 35. A Homebrew JDK may need an explicit `JAVA_H
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 ./gradlew :wear:testDebugUnitTest :mobile:testDebugUnitTest \
-  :wear:assembleDebug :wear:assembleRelease :mobile:assembleDebug
+  :wear:assembleDebug :wear:assembleRelease :wear:assembleDebugAndroidTest :mobile:assembleDebug
 ```
 
 The added lifecycle tests exercise the real start/stop/join code with controlled JVM
@@ -67,7 +95,7 @@ Use synthetic speech/test recordings, not private conversations.
 | Scenario | Expected result |
 | --- | --- |
 | Clean install, permission grant; first start from tile | Permission-capable app opens; no foreground-service exception; recording begins after grant. |
-| Stop from long-press, settings, or notification; reopen or recreate app | Remains stopped. Tile Start explicitly resumes. No duplicate capture threads. |
+| Choose Stop without saving from long-press/settings or the notification; reopen or recreate app | Remains stopped. Tile Start explicitly resumes. No duplicate capture threads. |
 | Deny/revoke microphone permission or force an encoder/read failure | No false success; terminal error visible; no retained `hindsight:capture` wake lock or listening notification after cleanup. Manual retry starts a fresh engine. |
 | Save immediately after starting | Saving then empty-buffer guidance, or a short valid clip; no success haptic for an empty/failed save. |
 | Tap repeatedly during save; stop while saving | No duplicate in-flight save; requested local save finishes before its source is released. The UI remains responsive during shutdown. |
@@ -78,7 +106,7 @@ Use synthetic speech/test recordings, not private conversations.
 | Save another clip while a transfer is running | Current drain picks it up; the late wakeup is not lost at worker completion. |
 | Kill/disconnect during transfer; reconnect | File remains on watch; retry succeeds; no duplicate concurrent channels. |
 | Successful save from tile, then open app | Latest local save result remains visible. After the matching ack, the result says “on phone.” |
-| TalkBack and enlarged text | Save/Start/Retry and Stop are named; new results are announced without announcing the buffer counter every second. Essential text remains legible and within the circular safe area. |
+| TalkBack and enlarged text | Save/Start/Retry and Stop are named; new results are announced without announcing the buffer counter every second. Safety text is reachable by scrolling at enlarged text sizes and remains within the circular safe area. |
 | Appearance, rotary scroll, swipe back | Recording controls are easy to reach; sensitivity changes only the visual meter. |
 | Leave waveform for settings; lower wrist; return | Meter work ceases without a visible resumed collector; capture continues. Returning shows fresh levels, not old history. |
 

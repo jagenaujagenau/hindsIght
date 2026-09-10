@@ -58,29 +58,40 @@ class ClipUploadWorker(
         // Install the fallback before sending: an OS kill/cancellation of an
         // immediate worker must not strand the outbox until the next user action.
         val retryWorker = inputData.getBoolean(ClipOutbox.IS_RETRY, false)
-        if (ClipOutbox.pending(applicationContext).isEmpty()) return@withContext Result.success()
+        ClipOutbox.refreshStatus(applicationContext)
         if (!retryWorker) ClipOutbox.enqueueRetry(applicationContext)
         val needsRetry = try {
             withTimeout(RUN_TIMEOUT_MS) {
-                val nodeId = findReceiverNode()
-                if (nodeId == null) {
-                    Log.i(TAG, "No reachable receiver; delayed retry remains scheduled")
-                    true
-                } else {
-                    val channelClient = Wearable.getChannelClient(applicationContext)
-                    ClipOutbox.drain.drain({ ClipOutbox.pending(applicationContext) }) { file ->
-                        try {
-                            sendOne(channelClient, nodeId, file)
-                            // Give the durable ack a chance to arrive before a queued
-                            // wakeup takes the lock and considers resending this file.
-                            withTimeoutOrNull(ACK_GRACE_MS) {
-                                RecorderBus.pendingUploads.first { !file.exists() }
-                            }
-                        } catch (t: CancellationException) {
-                            throw t
-                        } catch (t: Exception) {
-                            Log.w(TAG, "Failed to send ${file.name}", t)
+                var nodeId: String? = null
+                val channelClient = Wearable.getChannelClient(applicationContext)
+                ClipOutbox.drain.drain(
+                    pending = { ClipOutbox.pending(applicationContext) },
+                    prepare = {
+                        RecorderBus.publishSync(SyncState.Checking)
+                        nodeId = findReceiverNode()
+                        if (nodeId == null) RecorderBus.publishSync(SyncState.PhoneUnavailable)
+                        nodeId != null
+                    },
+                    completed = { pending ->
+                        ClipOutbox.refreshStatus(applicationContext)
+                        if (!pending) RecorderBus.publishSync(SyncState.Idle)
+                        else if (RecorderBus.sync.value is SyncState.Sending || RecorderBus.sync.value == SyncState.Checking) {
+                            RecorderBus.publishSync(SyncState.Retry("Transfer interrupted. Retry sync."))
                         }
+                    },
+                ) { file ->
+                    try {
+                        RecorderBus.publishSync(SyncState.Sending(file.name))
+                        sendOne(channelClient, checkNotNull(nodeId), file)
+                        if (file.exists()) RecorderBus.publishSync(SyncState.AwaitingAck(file.name))
+                        withTimeoutOrNull(ACK_GRACE_MS) {
+                            RecorderBus.pendingUploads.first { !file.exists() }
+                        }
+                    } catch (t: CancellationException) {
+                        throw t
+                    } catch (t: Exception) {
+                        RecorderBus.publishSync(SyncState.Retry("Transfer failed. Retry sync."))
+                        Log.w(TAG, "Failed to send ${file.name}", t)
                     }
                 }
             }

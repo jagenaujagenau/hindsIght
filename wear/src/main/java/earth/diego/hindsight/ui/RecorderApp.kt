@@ -1,10 +1,18 @@
 package earth.diego.hindsight.ui
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -13,22 +21,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.wear.compose.foundation.pager.rememberPagerState
 import androidx.wear.compose.material3.AppScaffold
-import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.HorizontalPagerScaffold
 import androidx.wear.compose.material3.MaterialTheme
-import androidx.wear.compose.material3.ScreenScaffold
-import androidx.wear.compose.material3.Text
 import androidx.wear.compose.foundation.pager.HorizontalPager
 import earth.diego.hindsight.data.RecorderSettings
 import earth.diego.hindsight.data.Appearance
+import earth.diego.hindsight.data.SessionLimit
+import earth.diego.hindsight.sync.ClipOutbox
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import earth.diego.hindsight.sync.SyncState
+import kotlinx.coroutines.withContext
 import earth.diego.hindsight.service.RecorderBus
 import earth.diego.hindsight.service.RecorderService
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -44,9 +53,23 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>, s
     val scope = rememberCoroutineScope()
 
     var granted by remember { mutableStateOf(initiallyGranted) }
+    var permissionRequested by rememberSaveable { mutableStateOf(false) }
+    var permanentlyDenied by remember { mutableStateOf(false) }
+    var stopOptionsOpen by rememberSaveable { mutableStateOf(false) }
+    val activity = remember(context) { context.findActivity() }
+    BackHandler(stopOptionsOpen) { stopOptionsOpen = false }
     var pendingStartRequest by rememberSaveable { mutableStateOf(startRequested) }
     val settings = remember { RecorderSettings(context) }
     val appearance by settings.appearance.collectAsStateWithLifecycle(Appearance())
+    val sessionLimit by settings.sessionLimit.collectAsStateWithLifecycle(SessionLimit.OFF)
+    val showHints by settings.showHints.collectAsStateWithLifecycle(true)
+    val storage by RecorderBus.storage.collectAsStateWithLifecycle()
+    val sync by RecorderBus.sync.collectAsStateWithLifecycle()
+    val battery by RecorderBus.battery.collectAsStateWithLifecycle()
+    val sessionNotice by RecorderBus.sessionNotice.collectAsStateWithLifecycle()
+    val save by RecorderBus.save.collectAsStateWithLifecycle()
+    val pending by RecorderBus.pendingUploads.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { ClipOutbox.refreshStatus(context) } }
     // The app shell needs transitions, not the once-per-second buffer counter.
     val recordingFlow = remember { RecorderBus.capture.map { it.recording }.distinctUntilChanged() }
     val recording by recordingFlow.collectAsStateWithLifecycle(false)
@@ -54,11 +77,16 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>, s
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { results ->
-        granted = results[android.Manifest.permission.RECORD_AUDIO] ?: granted
+        granted = results[Manifest.permission.RECORD_AUDIO] ?: granted
+        permanentlyDenied = needsPermissionSettings(permissionRequested, granted,
+            activity?.let { ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.RECORD_AUDIO) } == true)
     }
 
-    LaunchedEffect(granted) {
-        if (!granted) permissionLauncher.launch(requiredPermissions)
+    // Settings and permission revocation can change access without recreating this activity.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        permanentlyDenied = needsPermissionSettings(permissionRequested, granted,
+            activity?.let { ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.RECORD_AUDIO) } == true)
     }
 
     // The service reads persisted intent before starting. No optimistic `true`
@@ -75,7 +103,19 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>, s
     HindsightTheme {
         AppScaffold {
             if (!granted) {
-                PermissionScreen { permissionLauncher.launch(requiredPermissions) }
+                PermissionScreen(
+                    permanentlyDenied = permanentlyDenied,
+                    onRequest = { permissionRequested = true; permissionLauncher.launch(requiredPermissions) },
+                    onSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
+                )
+                return@AppScaffold
+            }
+            if (stopOptionsOpen) {
+                StopOptionsScreen(
+                    onSaveStop = { stopOptionsOpen = false; RecorderService.saveAndStop(context) },
+                    onDiscard = { stopOptionsOpen = false; RecorderService.stop(context) },
+                    onCancel = { stopOptionsOpen = false },
+                )
                 return@AppScaffold
             }
 
@@ -87,18 +127,20 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>, s
                     when (page) {
                         PAGE_WAVE -> {
                             val capture by RecorderBus.capture.collectAsStateWithLifecycle()
-                            val save by RecorderBus.save.collectAsStateWithLifecycle()
-                            val pending by RecorderBus.pendingUploads.collectAsStateWithLifecycle()
                             WaveScreen(
                                 state = capture,
                                 save = save,
                                 pendingUploads = pending,
                                 visible = pagerState.currentPage == PAGE_WAVE,
+                                showHints = showHints,
+                                sync = sync,
+                                warning = storage?.warning ?: if (capture.recording && battery?.low == true) "Low battery · ${battery?.percent}% remaining" else null,
+                                sessionNotice = sessionNotice,
                                 style = appearance.waveStyle,
                                 accent = appearance.accent.color ?: MaterialTheme.colorScheme.primary,
                                 sensitivity = appearance.sensitivity,
                                 onSave = { RecorderService.save(context) },
-                                onStop = { RecorderService.stop(context) },
+                                onStop = { stopOptionsOpen = true },
                                 onResume = { RecorderService.start(context) },
                             )
                         }
@@ -106,8 +148,28 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>, s
                         PAGE_SETTINGS -> SettingsScreen(
                             recording = recording,
                             onToggleRecording = {
-                                if (recording) RecorderService.stop(context) else RecorderService.start(context)
+                                if (recording) stopOptionsOpen = true else RecorderService.start(context)
                             },
+                            onSaveStop = { RecorderService.saveAndStop(context) },
+                            save = save,
+                            sessionNotice = sessionNotice,
+                            sessionLimit = sessionLimit,
+                            onTimer = { RecorderService.setTimer(context, it) },
+                            storage = storage,
+                            sync = sync,
+                            pendingUploads = pending,
+                            onSync = {
+                                scope.launch {
+                                    try {
+                                        withContext(Dispatchers.IO) { ClipOutbox.refreshStatus(context); ClipOutbox.enqueueUpload(context) }
+                                    } catch (t: CancellationException) {
+                                        throw t
+                                    } catch (t: Exception) {
+                                        RecorderBus.publishSync(SyncState.Retry("Could not schedule sync. Reopen the app and retry."))
+                                    }
+                                }
+                            },
+                            onHints = { scope.launch { settings.resetHints() } },
                             retention = appearance.retention,
                             waveStyle = appearance.waveStyle,
                             accent = appearance.accent,
@@ -125,22 +187,8 @@ fun RecorderApp(initiallyGranted: Boolean, requiredPermissions: Array<String>, s
     }
 }
 
-@Composable
-private fun PermissionScreen(onRequest: () -> Unit) {
-    ScreenScaffold {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Button(onClick = onRequest) {
-                Text(
-                    "Allow microphone",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-    }
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

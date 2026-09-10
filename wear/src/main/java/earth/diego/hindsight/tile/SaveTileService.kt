@@ -16,6 +16,8 @@ import earth.diego.hindsight.service.RecorderBus
 import earth.diego.hindsight.service.SaveState
 import earth.diego.hindsight.ui.saveMessage
 import earth.diego.hindsight.ui.formatBufferDuration
+import earth.diego.hindsight.ui.confirmationRemainingMs
+import earth.diego.hindsight.ui.syncMessage
 
 /**
  * A tile whose entire job is one tap.
@@ -57,10 +59,15 @@ class SaveTileService : TileService() {
             state.recording -> formatBufferDuration(state.bufferedMs)
             else -> "Not listening"
         }
-        val caption = if (state.error != null) "Open app to retry" else
-            saveMessage(save, pending) ?: if (state.recording) "buffered · tap to save" else "Tap to start"
+        val fallbackCaption = if (state.error != null) "Open app to retry" else
+            RecorderBus.sessionNotice.value ?:
+            saveMessage(if (save is SaveState.Saved) SaveState.Idle else save, 0) ?:
+            RecorderBus.storage.value?.warning ?:
+            syncMessage(RecorderBus.sync.value, pending) ?:
+            if (state.recording && RecorderBus.battery.value?.low == true) "Low battery · open app"
+            else if (state.recording) "buffered · tap to save" else "Tap to start"
 
-        val layout = LayoutElementBuilders.Box.Builder()
+        fun layoutFor(caption: String) = LayoutElementBuilders.Box.Builder()
             .setWidth(expand())
             .setHeight(expand())
             .setModifiers(ModifiersBuilders.Modifiers.Builder()
@@ -83,18 +90,25 @@ class SaveTileService : TileService() {
             )
             .build()
 
+        val now = System.currentTimeMillis()
+        val remaining = if (save is SaveState.Saved) confirmationRemainingMs(save, now) else 0L
+        val timeline = TimelineBuilders.Timeline.Builder()
+        val fallback = TimelineBuilders.TimelineEntry.Builder()
+            .setLayout(LayoutElementBuilders.Layout.Builder().setRoot(layoutFor(fallbackCaption)).build())
+        if (remaining > 0) {
+            val expires = now + remaining
+            timeline.addTimelineEntry(TimelineBuilders.TimelineEntry.Builder()
+                .setValidity(TimelineBuilders.TimeInterval.Builder().setStartMillis(now).setEndMillis(expires).build())
+                .setLayout(LayoutElementBuilders.Layout.Builder().setRoot(layoutFor(saveMessage(save, 0)!!)).build())
+                .build())
+            fallback.setValidity(TimelineBuilders.TimeInterval.Builder().setStartMillis(expires).setEndMillis(Long.MAX_VALUE).build())
+        }
+        timeline.addTimelineEntry(fallback.build())
         val tile = TileBuilders.Tile.Builder()
             .setResourcesVersion(RESOURCES_VERSION)
             .setFreshnessIntervalMillis(FRESHNESS_MS)
-            .setTileTimeline(
-                TimelineBuilders.Timeline.Builder()
-                    .addTimelineEntry(
-                        TimelineBuilders.TimelineEntry.Builder()
-                            .setLayout(LayoutElementBuilders.Layout.Builder().setRoot(layout).build())
-                            .build(),
-                    )
-                    .build(),
-            )
+            // The renderer expires confirmation locally; no five-second wakeup is needed.
+            .setTileTimeline(timeline.build())
             .build()
 
         return immediate(tile)
