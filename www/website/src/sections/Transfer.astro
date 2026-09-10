@@ -1,0 +1,12 @@
+---
+import PixelWatch from '../components/devices/PixelWatch';
+import { PixelPhone } from '../components/hindsight/PhoneTimeline';
+import Waveform from '../components/hindsight/Waveform';
+import PhoneTimeline from '../components/hindsight/PhoneTimeline';
+---
+<section class="transfer" aria-label="From watch to phone"><div class="transfer-stage">
+  <div class="transfer-heading"><span class="eyebrow">04 / There when you want it</span><h2>Saved on your phone.<br /><span>Gone from your watch.</span></h2></div>
+  <div class="transfer-devices"><div class="transfer-watch"><PixelWatch phase="queued" live={false} /></div><div class="travelling-clip"><Waveform count={56} progress={1} /></div><div class="transfer-phone"><PixelPhone /></div></div>
+  <p class="transfer-note">Your watch keeps its copy until your phone has it.<br />If your phone isn’t nearby, it waits. You don’t have to.</p>
+</div></section>
+<section class="timeline-section" id="archive"><div class="section-intro"><span class="eyebrow">05 / Find your way back</span><h2>The name escapes you.<br /><span>The moment doesn’t.</span></h2><p>That restaurant. Mum’s secret ingredient. The idea from your walk. Find a moment by when it happened, or a word you remember.</p></div><PhoneTimeline client:visible /><p class="timeline-footnote">Try “restaurant” or “lemon”, then open the moment. This is a silent demo with made-up conversations.</p></section>

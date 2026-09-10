@@ -1,0 +1,17 @@
+---
+import PixelWatch from '../components/devices/PixelWatch';
+import Waveform from '../components/hindsight/Waveform';
+import Icon from '../components/ui/Icon';
+---
+<section class="story" id="how-it-works" aria-label="How Hindsight saves the past">
+  <div class="story-stage">
+    <div class="story-device"><PixelWatch /></div>
+    <div class="story-copy story-listen"><span class="eyebrow">02 / Stay in the conversation</span><h2>Just<br />be here.</h2><p>No reaching for your phone. No “say that again.”<br class="desktop-only" /> Start listening on your watch, then carry on.</p></div>
+    <div class="story-copy story-forget"><span class="eyebrow">You don’t need to keep everything</span><h2>Let life<br /><em>move on.</em></h2><p>Your watch remembers only the last few minutes.<br />Unless you save them, they disappear.</p></div>
+    <div class="story-stream"><div class="stream-quotes"><span>“The secret is a little lemon…”</span><span>“There’s this tiny restaurant…”</span><span>“What if we tried…”</span></div><div class="stream-wave"><Waveform count={160} /></div><div class="stream-axis mono"><span>−01:00</span><span>−00:30</span><span>NOW</span></div><div class="saved-selection" /></div>
+    <div class="story-copy story-moment"><span class="eyebrow">What was that little place called?</span><h2>Wait.<br /><em>That mattered.</em></h2></div>
+    <div class="story-copy story-tap"><span class="eyebrow">03 / It’s not too late</span><h2>Keep it.</h2><p>One tap saves the minute you just heard.<br />You can come back to it. Stay here for now.</p></div>
+    <span class="story-note mono">SAMPLE MOMENT · WATCH SET TO 1 MINUTE</span>
+  </div>
+</section>
+<section class="rewind" aria-label="Save what already happened"><div class="rewind-stage"><p class="rewind-before">You don’t start recording.</p><h2>You save what<br /><em>already happened.</em></h2><div class="rewind-track"><Waveform count={160} progress={1} /><div class="axis-labels mono"><span>−01:00</span><span class="reverse-time">−00:30</span><span>NOW <Icon name="rewind" /></span></div></div><p class="rewind-foot">You didn’t miss your chance to keep it.</p></div></section>

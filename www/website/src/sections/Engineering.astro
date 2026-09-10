@@ -1,0 +1,21 @@
+---
+import BufferDemo from '../components/hindsight/BufferDemo';
+import Icon from '../components/ui/Icon';
+import { SOURCE } from '../lib/product';
+---
+<section class="engineering" id="buffer">
+  <div class="section-intro"><span class="eyebrow">07 / A little room to remember</span><h2>A minute.<br />A few more.<br /><em>You choose.</em></h2><p>How far back would you like to reach? Pick a window, let time pass, then save something before it slips away.</p></div>
+  <BufferDemo client:visible />
+</section>
+<section class="source-section" id="source">
+  <span class="eyebrow">08 / Open source. Open to you.</span>
+  <h2>For the curious.<br />And the tinkerers.</h2>
+  <p class="source-intro">You don’t need to read the code to get the idea.<br />But you should be able to see how something this personal works.</p>
+  <div class="architecture">
+    <div><span class="mono">01 / ON YOUR WATCH</span><p>A short memory. Always making room for now.</p></div>
+    <div><span class="mono">02 / WHEN YOU TAP</span><p>The last few minutes become yours to keep.</p></div>
+    <div><span class="mono">03 / ON YOUR PHONE</span><p>A home for the moments you chose.</p></div>
+  </div>
+  <a class="source-link" href={SOURCE}>Explore the project <Icon name="arrow-up-right" /></a>
+  <p class="source-disclosure">Read the code. Make it your own. Help it grow.<br />Build and setup instructions are on GitHub.</p>
+</section>

@@ -224,5 +224,6 @@ The JVM lifecycle test replaces only the capture thread body; it does not simula
 
 ## License
 
-No licence has been chosen, so default copyright applies and no permissions are granted.
-Add a `LICENSE` file if you want that to change.
+Hindsight is open source under the [MIT License](LICENSE).
+
+Use it, modify it, and make it your own. Third-party dependencies and bundled fonts retain their respective licenses.
